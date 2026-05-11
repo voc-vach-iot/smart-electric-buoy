@@ -4,6 +4,18 @@
 #include <espnow.h>
 #include <WiFiManager.h>
 #include <BlynkSimpleEsp8266.h>
+#include <WidgetRTC.h>
+#include <TimeLib.h>
+
+WidgetRTC rtc; // Đối tượng lấy thời gian từ Blynk
+String getTimeString()
+{
+    // Định dạng HH:MM:SS
+    const String currentTime = String(hour() < 10 ? "0" : "") + hour() + ":" +
+        (minute() < 10 ? "0" : "") + minute() + ":" +
+        (second() < 10 ? "0" : "") + second();
+    return "[" + currentTime + "] ";
+}
 
 // ReSharper disable CppParameterMayBeConstPtrOrRef => Vì phải khớp với type callback của esp_now
 // ReSharper disable once CppParameterNeverUsed => Dù có thể không dùng hết các tham số, nhưng phải giữ nguyên để đăng ký callback
@@ -64,7 +76,7 @@ void OnDataRecv(uint8_t* mac, uint8_t* incomingData, uint8_t len)
             Blynk.virtualWrite(V2, battery_percentage);
 
             const String statusStr = inMsg.status == 1 ? "💧 Bồn cạn -> ĐANG BƠM" : "✅ Bồn đầy -> DỪNG BƠM";
-            Blynk.virtualWrite(V3, statusStr + " (Pin: " + String(battery_percentage) + "%)\n");
+            Blynk.virtualWrite(V3, getTimeString() + statusStr + " (Pin: " + String(battery_percentage) + "%)\n");
         }
     }
 }
@@ -75,7 +87,12 @@ BLYNK_WRITE(V0)
     const int manualState = param.asInt();
     digitalWrite(RELAY_PIN, manualState);
     const String logMsg = manualState == 1 ? "👉 Bạn vừa BẬT bơm từ điện thoại" : "👉 Bạn vừa TẶT bơm từ điện thoại";
-    Blynk.virtualWrite(V3, logMsg + "\n");
+    Blynk.virtualWrite(V3, getTimeString() + logMsg + "\n");
+}
+
+BLYNK_CONNECTED()
+{
+    rtc.begin();
 }
 
 void setup()
@@ -111,6 +128,8 @@ void setup()
     if (wm.autoConnect(apName.c_str()))
     {
         Blynk.config(BLYNK_AUTH_TOKEN);
+        // Đặt khoảng thời gian đồng bộ lại (ví dụ 10 phút một lần)
+        setSyncInterval(10 * 60);
     }
     else
     {
