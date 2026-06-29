@@ -91,54 +91,71 @@ BuoyStatus getStatus()
     return PUMP_OFF;
 }
 
-/**
- * Hàm ép chip vào chế độ Light Sleep cực hạn.
- * Tiêu thụ ~1mA, giúp chip không bị "treo thây ma" (Zombie) 
- * và sẵn sàng Reset sạch sẽ khi phao kích chân RST.
- */
+void fpm_wakeup_cb_func()
+{
+}
+
 [[noreturn]] void enterForcedLightSleep()
 {
     DBG_PRINTLN("\nDbg: Preparation for Light Sleep...");
 
-    // 1. Dọn dẹp Wifi: Tắt hoàn toàn modem để giảm dòng sụt áp
+    // 1. Tắt WiFi đúng chuẩn và dọn dẹp các service đang chạy
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
-    WiFi.forceSleepBegin(); // Ép modem vào giấc ngủ sâu nhất
-    delay(10);
 
-    // 2. Cấu hình chế độ Light Sleep cho hệ thống
-    // FPM: Force Power Management
-    wifi_fpm_open();
-    wifi_fpm_set_sleep_type(LIGHT_SLEEP_T);
+    // 2. Triệt tiêu toàn bộ dòng rò tĩnh trên các chân không dùng 
+    // Ép các chân này về mức Pull-up nội vi để không bị rò điện ra ngoài vỏ hoặc linh kiện khác
+    pinMode(1, INPUT_PULLUP); // Chân TX (GPIO1) - giải phóng sau khi kết thúc Serial0
+    pinMode(0, INPUT_PULLUP); // Chân GPIO0
+    pinMode(2, INPUT_PULLUP); // Chân GPIO2 (Tắt debug Serial1 trước khi chip ngủ)
+    // Riêng chân PIN_SENSOR (RX/GPIO3) giữ nguyên theo trạng thái mạch ngoài của bạn
+
+    // 3. Kích hoạt Force Power Management (FPM)
+    wifi_fpm_open(); //
+
+    // Giữ nguyên hàm chuẩn biên dịch của PlatformIO/Arduino Core
+    wifi_fpm_set_wakeup_cb(fpm_wakeup_cb_func); //
+
+    // Thiết lập kiểu ngủ là Light Sleep
+    wifi_fpm_set_sleep_type(LIGHT_SLEEP_T); //
 
     DBG_PRINTLN("Dbg: Entering Forced Light Sleep. See you at Reset!");
-    delay(100); // Cho Serial kịp in hết
+    Serial1.flush(); // Ép Serial1 đẩy hết ký tự ra để tránh tiêu thụ điện lúc ngủ
 
-    // 3. Thực hiện ngủ vô thời hạn (0xFFFFFFF)
-    // Chip sẽ chỉ thức dậy khi có tác động vào chân RST (Reset vật lý)
-    wifi_fpm_do_sleep(0xFFFFFFF);
+    // 4. Thực hiện ngủ vô thời hạn cho đến khi chân RST bị kéo thấp vật lý
+    wifi_fpm_do_sleep(0xFFFFFFF); //
 
-    // 4. Vòng lặp khóa (Safety Loop)
-    // Khi chip đang trong quá trình ngủ, nó không được chạy tiếp bất cứ dòng code nào bên dưới
+    // 5. Bắt buộc phải có delay tối thiểu để CPU kịp chuyển trạng thái ngủ hoàn toàn
+    delay(10); //
+
+    // Vòng lặp an toàn chặn CPU chạy tiếp xuống dưới
     while (true)
     {
-        // Delay này rất quan trọng để CPU thực sự chuyển sang trạng thái Idle
+        EspClass::wdtFeed();
         delay(1000);
     }
 }
 
 void setup()
 {
-    // Khởi tạo Serial1 trên chân GPIO2 (TXD1)
+    // 1. Ngắt hoàn toàn Serial0 để giải phóng cứng chân RX khỏi khối UART
+    Serial.end();
+
+    // Khởi tạo Serial1 trên chân GPIO2 (TXD1) để debug
     DBG_BEGIN(74880);
     DBG_PRINTLN("\n\n--- SENDER DEBUG (Serial1/GPIO2) ---");
 
-    // 2. Đợi tụ nạp xong (Khoảng 500ms - 1s)
-    // Lúc này chip tiêu thụ rất ít điện vì chưa bật Wifi
-    pinMode(PIN_SENSOR, INPUT_PULLUP);
+    delay(50);
+    myData.battery_voltage = EspClass::getVcc();
+
+    // 2. Chuyển thành INPUT thuần túy (KHÔNG dùng INPUT_PULLUP nữa)
+    // Trở 100k bên ngoài sẽ tự nuôi điện áp
+    pinMode(PIN_SENSOR, INPUT);
+
+    // Đợi tụ nạp xong (Khoảng 500ms - 1s)
+    uint8_t count = 0;
     while (digitalRead(PIN_SENSOR) == LOW)
     {
-        static uint8_t count = 0;
         if (count++ > 20) break; // Đợi tối đa 2s
         delay(100);
     }
@@ -162,7 +179,6 @@ void setup()
 
     myData.key = SECRET_KEY;
     myData.msg_type = DATA_SEND;
-    myData.battery_voltage = ESP.getVcc();
 
     // Theo dõi quá trình áp sạc lại qua Serial1
     DBG_PRINTLN("Dbg: Waiting for voltage stability...");
