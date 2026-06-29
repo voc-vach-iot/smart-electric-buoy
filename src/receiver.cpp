@@ -57,7 +57,14 @@ void OnDataRecv(uint8_t* mac, uint8_t* incomingData, uint8_t len)
         }
 
         // Thực thi điều khiển Relay
-        digitalWrite(RELAY_PIN, inMsg.status);
+        if (inMsg.status == 1)
+        {
+            digitalWrite(RELAY_PIN, RELAY_ON);
+        }
+        else
+        {
+            digitalWrite(RELAY_PIN, RELAY_OFF);
+        }
 
         // Phản hồi DATA_ACK ngay lập tức để Sender yên tâm đi ngủ (Deep Sleep)
         struct_message res;
@@ -85,7 +92,14 @@ void OnDataRecv(uint8_t* mac, uint8_t* incomingData, uint8_t len)
 BLYNK_WRITE(V0)
 {
     const int manualState = param.asInt();
-    digitalWrite(RELAY_PIN, manualState);
+    if (manualState == 1)
+    {
+        digitalWrite(RELAY_PIN, RELAY_ON);
+    }
+    else
+    {
+        digitalWrite(RELAY_PIN, RELAY_OFF);
+    }
     const String logMsg = manualState == 1 ? "👉 Bạn vừa BẬT bơm từ điện thoại" : "👉 Bạn vừa TẶT bơm từ điện thoại";
     Blynk.virtualWrite(V3, getTimeString() + logMsg + "\n");
 }
@@ -98,8 +112,8 @@ BLYNK_CONNECTED()
 void setup()
 {
     Serial.begin(115200);
+    digitalWrite(RELAY_PIN, RELAY_OFF);
     pinMode(RELAY_PIN, OUTPUT);
-    digitalWrite(RELAY_PIN, LOW);
 
     // 1. Khởi tạo Mode WiFi sớm
     WiFi.mode(WIFI_AP_STA);

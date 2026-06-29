@@ -41,6 +41,15 @@ typedef struct struct_message
 // Định nghĩa chân cắm cho Receiver
 #ifdef RECEIVER_MODE
 #define RELAY_PIN 0
+#define RELAY_ACTIVE_LOW
+
+#ifdef RELAY_ACTIVE_LOW
+#define RELAY_ON  LOW
+#define RELAY_OFF HIGH
+#else
+#define RELAY_ON  HIGH
+#define RELAY_OFF LOW
+#endif
 #define BATTERY_MAX          3300 // Điện áp sau ổn áp (hoặc pin đã vơi)
 #define BATTERY_WARNING      2800 // Mức nên báo về điện thoại để đi sạc
 #define BATTERY_CRITICAL     2600 // Mức cực kỳ nguy hiểm, nên ngắt hệ thống
