@@ -2,6 +2,7 @@
 #define CONFIG_H
 
 #include <Arduino.h>
+
 // #define DEBUG_MODE 
 
 #define WIFI_CHANNEL 6
@@ -50,9 +51,11 @@ typedef struct struct_message
 #define RELAY_ON  HIGH
 #define RELAY_OFF LOW
 #endif
-#define BATTERY_MAX          3300 // Điện áp sau ổn áp (hoặc pin đã vơi)
-#define BATTERY_WARNING      2800 // Mức nên báo về điện thoại để đi sạc
-#define BATTERY_CRITICAL     2600 // Mức cực kỳ nguy hiểm, nên ngắt hệ thống
+
+#define BATTERY_MAX      3300 // Điện áp sau ổn áp (hoặc pin đã vơi)
+#define BATTERY_WARNING  2800 // Mức nên báo về điện thoại để đi sạc
+#define BATTERY_CRITICAL 2600 // Mức cực kỳ nguy hiểm, nên ngắt hệ thống
+
 #define BLYNK_TEMPLATE_ID "TMPL6fHo4wONF"
 #define BLYNK_TEMPLATE_NAME "Bơm điện thông minh"
 #define BLYNK_AUTH_TOKEN "FgKNLL0eg-YfPt7_6EMmGB27idL8eZ6w"
@@ -70,4 +73,4 @@ typedef struct struct_message
 #define DBG_BEGIN(...)
 #endif
 
-#endif
+#endif // CONFIG_H

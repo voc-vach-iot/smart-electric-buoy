@@ -1,17 +1,17 @@
-#include <Arduino.h>
-#include <config.h>
+#include "sender.h"
 #include <ESP8266WiFi.h>
 #include <espnow.h>
 #include <user_interface.h>
 
 ADC_MODE(ADC_VCC);
 
-uint8_t targetMac[6];
-uint8_t currentChannel = WIFI_CHANNEL;
-struct_message myData;
-volatile bool deliverySuccess = false;
+#define DEEP_SLEEP_TIME_US 0
 
-// --- QUẢN LÝ BỘ NHỚ RTC ---
+static uint8_t targetMac[6];
+static uint8_t currentChannel = WIFI_CHANNEL;
+static struct_message myData;
+static volatile bool deliverySuccess = false;
+
 void saveConfigToRTC(const uint8_t* mac, const uint8_t channel)
 {
     uint32_t part1, part2;
@@ -80,7 +80,6 @@ bool scanAndDiscover()
 
 BuoyStatus getStatus()
 {
-    // Debug giá trị thực tế chân RX đang đọc được
     const bool rawVal = digitalRead(PIN_SENSOR);
     DBG_PRINTF("Dbg: PIN_SENSOR Raw = %d (Expect EMPTY=%d)\n", rawVal, STATUS_EMPTY);
 
@@ -91,72 +90,35 @@ BuoyStatus getStatus()
     return PUMP_OFF;
 }
 
-void fpm_wakeup_cb_func()
+[[noreturn]] void enterDeepSleep()
 {
-}
+    DBG_PRINTLN("\nDbg: Entering Deep Sleep mode...");
+    Serial1.flush();
 
-[[noreturn]] void enterForcedLightSleep()
-{
-    DBG_PRINTLN("\nDbg: Preparation for Light Sleep...");
-
-    // 1. Tắt WiFi đúng chuẩn và dọn dẹp các service đang chạy
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
 
-    // 2. Triệt tiêu toàn bộ dòng rò tĩnh trên các chân không dùng 
-    // Ép các chân này về mức Pull-up nội vi để không bị rò điện ra ngoài vỏ hoặc linh kiện khác
-    pinMode(1, INPUT_PULLUP); // Chân TX (GPIO1) - giải phóng sau khi kết thúc Serial0
-    pinMode(0, INPUT_PULLUP); // Chân GPIO0
-    pinMode(2, INPUT_PULLUP); // Chân GPIO2 (Tắt debug Serial1 trước khi chip ngủ)
-    // Riêng chân PIN_SENSOR (RX/GPIO3) giữ nguyên theo trạng thái mạch ngoài của bạn
+    EspClass::deepSleep(DEEP_SLEEP_TIME_US, WAKE_RF_DEFAULT);
 
-    // 3. Kích hoạt Force Power Management (FPM)
-    wifi_fpm_open(); //
-
-    // Giữ nguyên hàm chuẩn biên dịch của PlatformIO/Arduino Core
-    wifi_fpm_set_wakeup_cb(fpm_wakeup_cb_func); //
-
-    // Thiết lập kiểu ngủ là Light Sleep
-    wifi_fpm_set_sleep_type(LIGHT_SLEEP_T); //
-
-    DBG_PRINTLN("Dbg: Entering Forced Light Sleep. See you at Reset!");
-    Serial1.flush(); // Ép Serial1 đẩy hết ký tự ra để tránh tiêu thụ điện lúc ngủ
-
-    // 4. Thực hiện ngủ vô thời hạn cho đến khi chân RST bị kéo thấp vật lý
-    wifi_fpm_do_sleep(0xFFFFFFF); //
-
-    // 5. Bắt buộc phải có delay tối thiểu để CPU kịp chuyển trạng thái ngủ hoàn toàn
-    delay(10); //
-
-    // Vòng lặp an toàn chặn CPU chạy tiếp xuống dưới
     while (true)
     {
-        EspClass::wdtFeed();
-        delay(1000);
+        yield();
     }
 }
 
 void setup()
 {
-    // 1. Ngắt hoàn toàn Serial0 để giải phóng cứng chân RX khỏi khối UART
     Serial.end();
 
-    // Khởi tạo Serial1 trên chân GPIO2 (TXD1) để debug
     DBG_BEGIN(74880);
-    DBG_PRINTLN("\n\n--- SENDER DEBUG (Serial1/GPIO2) ---");
+    DBG_PRINTLN("\n\n--- SENDER DEBUG (DeepSleep Mode) ---");
 
-    delay(50);
-    myData.battery_voltage = EspClass::getVcc();
-
-    // 2. Chuyển thành INPUT thuần túy (KHÔNG dùng INPUT_PULLUP nữa)
-    // Trở 100k bên ngoài sẽ tự nuôi điện áp
     pinMode(PIN_SENSOR, INPUT);
 
-    // Đợi tụ nạp xong (Khoảng 500ms - 1s)
     uint8_t count = 0;
     while (digitalRead(PIN_SENSOR) == LOW)
     {
-        if (count++ > 20) break; // Đợi tối đa 2s
+        if (count++ > 20) break;
         delay(100);
     }
 
@@ -169,7 +131,7 @@ void setup()
     if (esp_now_init() != 0)
     {
         DBG_PRINTLN("Dbg: ESP-NOW Init Fail");
-        enterForcedLightSleep();
+        enterDeepSleep();
     }
 
     esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
@@ -180,13 +142,21 @@ void setup()
     myData.key = SECRET_KEY;
     myData.msg_type = DATA_SEND;
 
-    // Theo dõi quá trình áp sạc lại qua Serial1
     DBG_PRINTLN("Dbg: Waiting for voltage stability...");
     for (int i = 0; i < 5; i++)
     {
         DBG_PRINTF("Dbg: Current RX: %d\n", digitalRead(PIN_SENSOR));
         delay(100);
     }
+
+    uint32_t vcc_acc = 0;
+    for (int i = 0; i < 4; i++)
+    {
+        vcc_acc += EspClass::getVcc();
+        delay(10);
+    }
+    myData.battery_voltage = vcc_acc / 4;
+    DBG_PRINTF("Dbg: Calibrated VCC = %d mV\n", myData.battery_voltage);
 
     myData.status = getStatus();
     DBG_PRINTF("Dbg: Status to send: %s\n", myData.status == PUMP_ON ? "ON" : "OFF");
@@ -203,9 +173,9 @@ void setup()
         {
             if (deliverySuccess)
             {
-                DBG_PRINTLN("Dbg: Quick Success. Sleep.");
+                DBG_PRINTLN("Dbg: Quick Success. Going to Deep Sleep.");
                 delay(50);
-                enterForcedLightSleep();
+                enterDeepSleep();
             }
             yield();
         }
@@ -225,9 +195,9 @@ void setup()
         }
     }
 
-    DBG_PRINTLN("Dbg: Final Sleep.");
+    DBG_PRINTLN("Dbg: Final Deep Sleep.");
     delay(50);
-    enterForcedLightSleep();
+    enterDeepSleep();
 }
 
 void loop()
