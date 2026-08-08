@@ -33,10 +33,11 @@ typedef struct struct_message
 
 // Định nghĩa chân cắm cho Sender
 #ifdef SENDER_MODE
-#define PIN_SENSOR 3
+#define PIN_MCU_ACK 2
+#define PIN_LEVEL_INPUT 3
 #define PIN_MODE INPUT
-#define STATUS_FULL LOW
-#define STATUS_EMPTY HIGH
+#define STATUS_FULL HIGH
+#define STATUS_EMPTY LOW
 #endif
 
 // Định nghĩa chân cắm cho Receiver
@@ -62,10 +63,10 @@ typedef struct struct_message
 #endif
 
 #ifdef DEBUG_MODE
-#define DBG_PRINT(...) Serial1.print(__VA_ARGS__)
-#define DBG_PRINTLN(...) Serial1.println(__VA_ARGS__)
-#define DBG_PRINTF(...) Serial1.printf(__VA_ARGS__)
-#define DBG_BEGIN(...) Serial1.begin(__VA_ARGS__)
+#define DBG_PRINT(...) Serial.print(__VA_ARGS__)
+#define DBG_PRINTLN(...) Serial.println(__VA_ARGS__)
+#define DBG_PRINTF(...) Serial.printf(__VA_ARGS__)
+#define DBG_BEGIN(...) Serial.begin(__VA_ARGS__)
 #else
 #define DBG_PRINT(...)
 #define DBG_PRINTLN(...)

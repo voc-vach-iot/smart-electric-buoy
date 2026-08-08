@@ -1,40 +1,72 @@
-#include "sender.h"
+#include "config.h"
 #include <ESP8266WiFi.h>
 #include <espnow.h>
+#include <EEPROM.h>
 #include <user_interface.h>
 
 ADC_MODE(ADC_VCC);
 
-#define DEEP_SLEEP_TIME_US 0
+#define EEPROM_SIZE 32
+#define EEPROM_ADDR 0
+#define EEPROM_MAGIC 0xAB // Byte kiểm tra xem EEPROM đã lưu dữ liệu hợp lệ chưa
 
-static uint8_t targetMac[6];
-static uint8_t currentChannel = WIFI_CHANNEL;
+namespace
+{
+    struct ConfigData
+    {
+        uint8_t magic;
+        uint8_t mac[6];
+        uint8_t channel;
+    };
+}
+
+static ConfigData sysConfig;
 static struct_message myData;
 static volatile bool deliverySuccess = false;
 
-void saveConfigToRTC(const uint8_t* mac, const uint8_t channel)
+// 🛠️ ĐỌC / GHI CẤU HÌNH BẰNG EEPROM (FLASH) THAY CHO RTC RAM
+static void saveConfigToEEPROM(const uint8_t* mac, const uint8_t channel)
 {
-    uint32_t part1, part2;
-    memcpy(&part1, mac, 4);
-    memcpy(&part2, mac + 4, 2);
-    part2 |= static_cast<uint32_t>(channel) << 16;
-    system_rtc_mem_write(RTC_ADDR, &part1, 4);
-    system_rtc_mem_write(RTC_ADDR + 1, &part2, 4);
+    // 1. Nếu dữ liệu mới GIỐNG HỆT dữ liệu cũ đang lưu thì BỎ QUA, không ghi Flash
+    if (sysConfig.magic == EEPROM_MAGIC &&
+        sysConfig.channel == channel &&
+        memcmp(sysConfig.mac, mac, 6) == 0)
+    {
+        DBG_PRINTLN("Dbg: Config unchanged, skip writing to Flash.");
+        return;
+    }
+
+    // 2. Chỉ ghi khi Kênh hoặc MAC thực sự thay đổi
+    sysConfig.magic = EEPROM_MAGIC;
+    memcpy(sysConfig.mac, mac, 6);
+    sysConfig.channel = channel;
+
+    EEPROM.begin(EEPROM_SIZE);
+    EEPROM.put(EEPROM_ADDR, sysConfig);
+    EEPROM.commit(); // Thao tác này mới thực sự tốn 1 lần Write Cycle
+    EEPROM.end();
+    DBG_PRINTLN("Dbg: Saved NEW config to Flash/EEPROM!");
 }
 
-void loadConfigFromRTC()
+static bool loadConfigFromEEPROM()
 {
-    uint32_t part1, part2;
-    system_rtc_mem_read(RTC_ADDR, &part1, 4);
-    system_rtc_mem_read(RTC_ADDR + 1, &part2, 4);
-    memcpy(targetMac, &part1, 4);
-    memcpy(targetMac + 4, &part2, 2);
-    currentChannel = part2 >> 16 & 0xFF;
+    EEPROM.begin(EEPROM_SIZE);
+    EEPROM.get(EEPROM_ADDR, sysConfig);
+    EEPROM.end();
+
+    if (sysConfig.magic == EEPROM_MAGIC && sysConfig.channel >= 1 && sysConfig.channel <= 13)
+    {
+        DBG_PRINTF("Dbg: Loaded EEPROM - CH: %d\n", sysConfig.channel);
+        return true;
+    }
+
+    DBG_PRINTLN("Dbg: EEPROM empty or invalid!");
+    return false;
 }
 
 // ReSharper disable CppParameterMayBeConstPtrOrRef => Vì phải khớp với type callback của esp_now
 // ReSharper disable once CppParameterNeverUsed => Dù có thể không dùng hết các tham số, nhưng phải giữ nguyên để đăng ký callback
-void OnDataRecv(uint8_t* mac, uint8_t* incomingData, const uint8_t len)
+static void OnDataRecv(uint8_t* mac, uint8_t* incomingData, const uint8_t len)
 {
     struct_message inMsg;
     if (len < sizeof(inMsg)) return;
@@ -43,13 +75,13 @@ void OnDataRecv(uint8_t* mac, uint8_t* incomingData, const uint8_t len)
 
     if (inMsg.msg_type == DISCOVERY_ACK || inMsg.msg_type == DATA_ACK)
     {
-        memcpy(targetMac, mac, 6);
+        memcpy(sysConfig.mac, mac, 6);
         deliverySuccess = true;
         DBG_PRINTLN("Dbg: ACK Received!");
     }
 }
 
-bool scanAndDiscover()
+static bool scanAndDiscover()
 {
     DBG_PRINTLN("Dbg: Starting Scan...");
     uint8_t broadcastMac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -62,12 +94,11 @@ bool scanAndDiscover()
         esp_now_send(broadcastMac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
 
         const unsigned long wait = millis();
-        while (millis() - wait < 250)
+        while (millis() - wait < 40)
         {
             if (deliverySuccess)
             {
-                currentChannel = c;
-                saveConfigToRTC(targetMac, currentChannel);
+                saveConfigToEEPROM(sysConfig.mac, c);
                 DBG_PRINTF("Dbg: Found on CH %d\n", c);
                 return true;
             }
@@ -78,28 +109,33 @@ bool scanAndDiscover()
     return false;
 }
 
-BuoyStatus getStatus()
+// Đọc trực tiếp mức logic ghim từ CH32 qua chân RX (GPIO3)
+static BuoyStatus getStatus()
 {
-    const bool rawVal = digitalRead(PIN_SENSOR);
-    DBG_PRINTF("Dbg: PIN_SENSOR Raw = %d (Expect EMPTY=%d)\n", rawVal, STATUS_EMPTY);
+    const bool rawVal = digitalRead(PIN_LEVEL_INPUT);
+    DBG_PRINTF("Dbg: PIN_LEVEL_INPUT Raw = %d\n", rawVal);
 
-    if (rawVal == STATUS_EMPTY)
+    if (rawVal == STATUS_FULL)
     {
-        return PUMP_ON;
+        return PUMP_OFF; // Mức HIGH từ CH32 -> Bồn đầy -> Báo TẮT BƠM
     }
-    return PUMP_OFF;
+    return PUMP_ON; // Mức LOW từ CH32 -> Bồn cạn -> Báo BẬT BƠM
 }
 
-[[noreturn]] void enterDeepSleep()
+// 🛠️ HÀM BÁO HOÀN THÀNH VÀ CHỜ CH32 TẮT NGUỒN
+[[noreturn]] static void finishAndShutdown()
 {
-    DBG_PRINTLN("\nDbg: Entering Deep Sleep mode...");
-    Serial1.flush();
+    DBG_PRINTLN("\nDbg: Gui tin hieu FINISH cho CH32 de ngat nguon EN...");
 
+    // 1. Dập chân ACK (GPIO2) xuống LOW để báo CH32 biết việc đã xong
+    pinMode(PIN_MCU_ACK, OUTPUT);
+    digitalWrite(PIN_MCU_ACK, LOW);
+
+    // 2. Tắt các tiến trình WiFi
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
 
-    EspClass::deepSleep(DEEP_SLEEP_TIME_US, WAKE_RF_DEFAULT);
-
+    // 3. Đứng chờ CH32 dập chân EN ngắt nguồn hoàn toàn
     while (true)
     {
         yield();
@@ -108,86 +144,82 @@ BuoyStatus getStatus()
 
 void setup()
 {
+    // 🛠️ BƯỚC 1: Khóa chân ACK (GPIO2) ở INPUT để bảo vệ Bootrom
+    pinMode(PIN_MCU_ACK, INPUT);
+
+    // 🛠️ BƯỚC 2: Giải phóng chân RX (GPIO3) làm chân Digital Input
     Serial.end();
+    pinMode(PIN_LEVEL_INPUT, INPUT);
+    delay(2);
 
     DBG_BEGIN(74880);
-    DBG_PRINTLN("\n\n--- SENDER DEBUG (DeepSleep Mode) ---");
+    DBG_PRINTLN("\n\n--- SENDER ĐÃ TỐI ƯU CÙNG CH32V003 (NO RTC) ---");
 
-    pinMode(PIN_SENSOR, INPUT);
-
-    uint8_t count = 0;
-    while (digitalRead(PIN_SENSOR) == LOW)
-    {
-        if (count++ > 20) break;
-        delay(100);
-    }
-
-    pinMode(PIN_SENSOR, PIN_MODE);
-    DBG_PRINTF("Dbg: PIN_SENSOR configured on GPIO %d\n", PIN_SENSOR);
-
+    // Khởi tạo ESP-NOW
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
 
     if (esp_now_init() != 0)
     {
         DBG_PRINTLN("Dbg: ESP-NOW Init Fail");
-        enterDeepSleep();
+        finishAndShutdown();
     }
 
     esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
     esp_now_register_recv_cb(OnDataRecv);
 
-    loadConfigFromRTC();
-
     myData.key = SECRET_KEY;
     myData.msg_type = DATA_SEND;
 
-    DBG_PRINTLN("Dbg: Waiting for voltage stability...");
-    for (int i = 0; i < 5; i++)
-    {
-        DBG_PRINTF("Dbg: Current RX: %d\n", digitalRead(PIN_SENSOR));
-        delay(100);
-    }
-
+    // Đo điện áp VCC
     uint32_t vcc_acc = 0;
     for (int i = 0; i < 4; i++)
     {
         vcc_acc += EspClass::getVcc();
-        delay(10);
     }
     myData.battery_voltage = vcc_acc / 4;
-    DBG_PRINTF("Dbg: Calibrated VCC = %d mV\n", myData.battery_voltage);
+    DBG_PRINTF("Dbg: VCC = %d mV\n", myData.battery_voltage);
 
+    // Đọc trạng thái phao ghim sẵn từ CH32
     myData.status = getStatus();
     DBG_PRINTF("Dbg: Status to send: %s\n", myData.status == PUMP_ON ? "ON" : "OFF");
 
-    if (currentChannel >= 1 && currentChannel <= 13)
-    {
-        DBG_PRINTF("Dbg: Quick send CH %d\n", currentChannel);
-        wifi_set_channel(currentChannel);
-        esp_now_add_peer(targetMac, ESP_NOW_ROLE_COMBO, currentChannel, nullptr, 0);
-        esp_now_send(targetMac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
+    // Lấy kênh WiFi & MAC đã lưu từ EEPROM
 
-        const unsigned long startWait = millis();
-        while (millis() - startWait < 400)
+    // Nếu đã có cấu hình trong EEPROM -> Gửi nhanh
+    if (loadConfigFromEEPROM())
+    {
+        DBG_PRINTF("Dbg: Quick send CH %d\n", sysConfig.channel);
+        wifi_set_channel(sysConfig.channel);
+        esp_now_add_peer(sysConfig.mac, ESP_NOW_ROLE_COMBO, sysConfig.channel, nullptr, 0);
+
+        for (uint8_t retry = 0; retry < 3; retry++)
         {
-            if (deliverySuccess)
+            esp_now_send(sysConfig.mac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
+
+            const unsigned long startWait = millis();
+            while (millis() - startWait < 80)
             {
-                DBG_PRINTLN("Dbg: Quick Success. Going to Deep Sleep.");
-                delay(50);
-                enterDeepSleep();
+                if (deliverySuccess)
+                {
+                    DBG_PRINTLN("Dbg: Quick Success.");
+                    finishAndShutdown(); // Dập ACK LOW & chờ CH32 cắt nguồn EN
+                }
+                yield();
             }
-            yield();
+            if (deliverySuccess) break;
         }
     }
 
+    // Nếu gửi nhanh thất bại hoặc chưa có EEPROM -> Quét 13 kênh
     if (!deliverySuccess)
     {
         if (scanAndDiscover())
         {
-            esp_now_add_peer(targetMac, ESP_NOW_ROLE_COMBO, currentChannel, nullptr, 0);
-            esp_now_send(targetMac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
-            delay(100);
+            myData.msg_type = DATA_SEND;
+            esp_now_add_peer(sysConfig.mac, ESP_NOW_ROLE_COMBO, sysConfig.channel, nullptr, 0);
+            esp_now_send(sysConfig.mac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
+            delay(40);
         }
         else
         {
@@ -195,9 +227,8 @@ void setup()
         }
     }
 
-    DBG_PRINTLN("Dbg: Final Deep Sleep.");
-    delay(50);
-    enterDeepSleep();
+    // Hoàn thành nhiệm vụ -> Báo CH32 ngắt nguồn
+    finishAndShutdown();
 }
 
 void loop()
