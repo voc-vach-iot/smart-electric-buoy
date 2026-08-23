@@ -31,13 +31,18 @@ typedef struct struct_message
     uint16_t battery_voltage; // Giá trị pin tính theo mV
 } struct_message;
 
+#define BATTERY_MAX      3300 // Điện áp sau ổn áp (hoặc pin đã vơi)
+#define BATTERY_WARNING  2800 // Mức nên báo về điện thoại để đi sạc
+#define BATTERY_CRITICAL 2600 // Mức cực kỳ nguy hiểm, nên ngắt hệ thống
+
 // Định nghĩa chân cắm cho Sender
 #ifdef SENDER_MODE
-#define PIN_MCU_ACK 2
+#define PIN_MCU_ACK 0
 #define PIN_LEVEL_INPUT 3
 #define PIN_MODE INPUT
 #define STATUS_FULL HIGH
 #define STATUS_EMPTY LOW
+#define VCC_SS8550_OFFSET 175
 #endif
 
 // Định nghĩa chân cắm cho Receiver
@@ -52,10 +57,6 @@ typedef struct struct_message
 #define RELAY_ON  HIGH
 #define RELAY_OFF LOW
 #endif
-
-#define BATTERY_MAX      3300 // Điện áp sau ổn áp (hoặc pin đã vơi)
-#define BATTERY_WARNING  2800 // Mức nên báo về điện thoại để đi sạc
-#define BATTERY_CRITICAL 2600 // Mức cực kỳ nguy hiểm, nên ngắt hệ thống
 
 #define BLYNK_TEMPLATE_ID "TMPL6fHo4wONF"
 #define BLYNK_TEMPLATE_NAME "Bơm điện thông minh"

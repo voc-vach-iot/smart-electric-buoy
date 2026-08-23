@@ -177,7 +177,10 @@ void setup()
     {
         vcc_acc += EspClass::getVcc();
     }
-    myData.battery_voltage = vcc_acc / 4;
+    uint32_t average_battery_voltage = vcc_acc / 4 + VCC_SS8550_OFFSET;
+    if (average_battery_voltage > BATTERY_MAX) average_battery_voltage = BATTERY_MAX;
+    if (average_battery_voltage < BATTERY_CRITICAL) average_battery_voltage = BATTERY_CRITICAL;
+    myData.battery_voltage = vcc_acc / 4 + VCC_SS8550_OFFSET;
     DBG_PRINTF("Dbg: VCC = %d mV\n", myData.battery_voltage);
 
     // Đọc trạng thái phao ghim sẵn từ CH32
