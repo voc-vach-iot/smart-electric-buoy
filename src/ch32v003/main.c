@@ -11,20 +11,17 @@ static void setup()
     pinMode(PIN_PUMP_FULL, INPUT);
     pinMode(PIN_PUMP_EMPTY, INPUT);
 
-    // 2. Chân ACK_WAIT (Pin 3) chờ xung FINISH từ ESP -> Đặt INPUT_PULLUP (Mặc định HIGH)
-    pinMode(PIN_ESP_ACK_WAIT, INPUT_PULLUP);
-
-    // 3. Chân LEVEL_OUTPUT (Pin 1) làm Output ghim áp sang RX của ESP
+    // 2. Chân LEVEL_OUTPUT (Pin 1) làm Output ghim áp sang RX của ESP
     pinMode(PIN_LEVEL_OUTPUT, OUTPUT);
-    digitalWrite(PIN_LEVEL_OUTPUT, HIGH); // Mặc định ghim HIGH
+    digitalWrite(PIN_LEVEL_OUTPUT, PUMP_EMPTY_STATUS); // Mặc định ghim LOW
 
-    // 4. Chân Điều khiển nguồn EN/RST (Pin 6)
-    pinMode(PIN_ESP_EN, OUTPUT);
-    digitalWrite(PIN_ESP_EN, LOW); // Mặc định dập LOW ngắt hẳn nguồn ESP khi đi ngủ
+    // 3. Chân Điều khiển nguồn cho ESP (Pin 6) làm Output
+    pinMode(PIN_ESP_POWER, OUTPUT);
+    digitalWrite(PIN_ESP_POWER, ESP_POWER_OFF); // Mặc định ngắt nguồn ESP
 
-    // 5. Cấu hình Wakeup Pin khi phao kéo xuống GND
-    enableWakeupPin(PIN_PUMP_EMPTY, WAKEUP_FALLING);
-    enableWakeupPin(PIN_PUMP_FULL, WAKEUP_FALLING);
+    // 4. Cấu hình Wakeup Pin khi phao kéo xuống GND
+    enableWakeupPin(PIN_PUMP_EMPTY, WAKEUP_RISING);
+    enableWakeupPin(PIN_PUMP_FULL, WAKEUP_RISING);
 
     printf("\r\n--- CH32V003 POWER MANAGER INIT SUCCESS ---\r\n");
 }
@@ -32,7 +29,7 @@ static void setup()
 static void loop()
 {
     // Đảm bảo ngắt nguồn ESP trước khi đi ngủ
-    digitalWrite(PIN_ESP_EN, LOW);
+    digitalWrite(PIN_ESP_POWER, ESP_POWER_OFF);
 
     printf("-> [LOG]: Chuan bi chim vao Sleep...\r\n");
     delayMs(5);
@@ -54,17 +51,17 @@ static void loop()
     uint8_t isTrueInterrupt = 0;
 
     // [BƯỚC 1]: GHIM MỨC LOGIC SANG CHÂN LEVEL_OUTPUT (RX CỦA ESP)
-    if (status_empty == LOW)
+    if (status_empty == FLOAT_ACTIVE)
     {
         // Phao cạn đóng -> Ghim LOW sang RX của ESP (Lệnh BẬT BƠM)
-        digitalWrite(PIN_LEVEL_OUTPUT, LOW);
+        digitalWrite(PIN_LEVEL_OUTPUT, PUMP_EMPTY_STATUS);
         printf("-> [LOG]: KET LUAN -> PHAO CAN CHẬP! Ghim LEVEL_OUTPUT (Pin1) = LOW\r\n");
         isTrueInterrupt = 1;
     }
-    else if (status_full == LOW)
+    else if (status_full == FLOAT_ACTIVE)
     {
         // Phao đầy đóng -> Ghim HIGH sang RX của ESP (Lệnh TẮT BƠM)
-        digitalWrite(PIN_LEVEL_OUTPUT, HIGH);
+        digitalWrite(PIN_LEVEL_OUTPUT, PUMP_FULL_STAUS);
         printf("-> [LOG]: KET LUAN -> PHAO ĐẦY CHẬP! Ghim LEVEL_OUTPUT (Pin1) = HIGH\r\n");
         isTrueInterrupt = 1;
     }
@@ -79,7 +76,8 @@ static void loop()
         delayMs(2);
 
         // [BƯỚC 2]: ĐÁNH THỨC ESP-01S (Cấp nguồn EN = HIGH)
-        digitalWrite(PIN_ESP_EN, HIGH);
+        pinMode(PIN_ESP_ACK_WAIT, INPUT_PULLUP); // Mở chân ACK_WAIT (Pin3) làm INPUT_PULLUP để chờ xung FINISH từ ESP
+        digitalWrite(PIN_ESP_POWER, ESP_POWER_ON);
         printf("-> [LOG]: Da cap nguon ESP (EN = HIGH). ESP-01S dang BOOT...\r\n");
         delayMs(100);
 
@@ -108,7 +106,10 @@ static void loop()
         }
 
         // [BƯỚC 4]: TẮT NGUỒN ESP ĐỂ TIẾP TỤC ĐI NGỦ
-        digitalWrite(PIN_ESP_EN, LOW);
+        digitalWrite(PIN_ESP_POWER, ESP_POWER_OFF);
+        digitalWrite(PIN_LEVEL_OUTPUT, PUMP_EMPTY_STATUS); // Reset chân LEVEL_OUTPUT về LOW
+        pinMode(PIN_ESP_ACK_WAIT, OUTPUT); // Khóa chân ACK_WAIT (Pin3) ở OUTPUT để bảo vệ Bootrom
+        digitalWrite(PIN_ESP_ACK_WAIT, LOW); // Khóa chân ACK_WAIT (Pin3) ở OUTPUT để bảo vệ Bootrom
         printf("-> [LOG]: Da ngat nguon ESP (EN = LOW).\r\n");
     }
 
