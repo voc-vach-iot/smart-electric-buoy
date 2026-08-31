@@ -8,7 +8,7 @@ ADC_MODE(ADC_VCC);
 
 #define EEPROM_SIZE 32
 #define EEPROM_ADDR 0
-#define EEPROM_MAGIC 0xAB // Byte kiểm tra xem EEPROM đã lưu dữ liệu hợp lệ chưa
+#define EEPROM_MAGIC 0xAB
 
 namespace
 {
@@ -23,11 +23,12 @@ namespace
 static ConfigData sysConfig;
 static struct_message myData;
 static volatile bool deliverySuccess = false;
+static uint8_t broadcastMac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
-// 🛠️ ĐỌC / GHI CẤU HÌNH BẰNG EEPROM (FLASH) THAY CHO RTC RAM
+// Lưu config (có log chi tiết)
 static void saveConfigToEEPROM(const uint8_t* mac, const uint8_t channel)
 {
-    // 1. Nếu dữ liệu mới GIỐNG HỆT dữ liệu cũ đang lưu thì BỎ QUA, không ghi Flash
+    // Kiểm tra trùng để tránh ghi thừa
     if (sysConfig.magic == EEPROM_MAGIC &&
         sysConfig.channel == channel &&
         memcmp(sysConfig.mac, mac, 6) == 0)
@@ -36,18 +37,26 @@ static void saveConfigToEEPROM(const uint8_t* mac, const uint8_t channel)
         return;
     }
 
-    // 2. Chỉ ghi khi Kênh hoặc MAC thực sự thay đổi
     sysConfig.magic = EEPROM_MAGIC;
     memcpy(sysConfig.mac, mac, 6);
     sysConfig.channel = channel;
 
     EEPROM.begin(EEPROM_SIZE);
     EEPROM.put(EEPROM_ADDR, sysConfig);
-    EEPROM.commit(); // Thao tác này mới thực sự tốn 1 lần Write Cycle
+    const bool ok = EEPROM.commit();
     EEPROM.end();
-    DBG_PRINTLN("Dbg: Saved NEW config to Flash/EEPROM!");
+
+    DBG_PRINTF("Dbg: saveConfigToEEPROM() - MAC: %02X:%02X:%02X:%02X:%02X:%02X | CH: %d\n",
+               sysConfig.mac[0], sysConfig.mac[1], sysConfig.mac[2],
+               sysConfig.mac[3], sysConfig.mac[4], sysConfig.mac[5],
+               sysConfig.channel);
+    if (ok)
+        DBG_PRINTLN("Dbg: EEPROM commit SUCCESS!");
+    else
+        DBG_PRINTLN("Dbg: EEPROM commit FAILED!");
 }
 
+// Đọc EEPROM với log MAC và channel
 static bool loadConfigFromEEPROM()
 {
     EEPROM.begin(EEPROM_SIZE);
@@ -56,7 +65,10 @@ static bool loadConfigFromEEPROM()
 
     if (sysConfig.magic == EEPROM_MAGIC && sysConfig.channel >= 1 && sysConfig.channel <= 13)
     {
-        DBG_PRINTF("Dbg: Loaded EEPROM - CH: %d\n", sysConfig.channel);
+        DBG_PRINTF("Dbg: Loaded EEPROM - MAC: %02X:%02X:%02X:%02X:%02X:%02X | CH: %d\n",
+                   sysConfig.mac[0], sysConfig.mac[1], sysConfig.mac[2],
+                   sysConfig.mac[3], sysConfig.mac[4], sysConfig.mac[5],
+                   sysConfig.channel);
         return true;
     }
 
@@ -64,12 +76,14 @@ static bool loadConfigFromEEPROM()
     return false;
 }
 
+// Callback nhận ACK (đã có log)
 // ReSharper disable CppParameterMayBeConstPtrOrRef => Vì phải khớp với type callback của esp_now
 // ReSharper disable once CppParameterNeverUsed => Dù có thể không dùng hết các tham số, nhưng phải giữ nguyên để đăng ký callback
 static void OnDataRecv(uint8_t* mac, uint8_t* incomingData, const uint8_t len)
 {
+    if (len != sizeof(struct_message)) return;
+
     struct_message inMsg;
-    if (len < sizeof(inMsg)) return;
     memcpy(&inMsg, incomingData, sizeof(inMsg));
     if (inMsg.key != SECRET_KEY) return;
 
@@ -77,85 +91,109 @@ static void OnDataRecv(uint8_t* mac, uint8_t* incomingData, const uint8_t len)
     {
         memcpy(sysConfig.mac, mac, 6);
         deliverySuccess = true;
-        DBG_PRINTLN("Dbg: ACK Received!");
+        DBG_PRINTF("Dbg: ACK received from %02X:%02X:%02X:%02X:%02X:%02X\n",
+                   mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     }
 }
 
+// Thêm peer có log lỗi
+static bool addPeerWithRetry(uint8_t* mac, const uint8_t channel)
+{
+    if (const int res = esp_now_add_peer(mac, ESP_NOW_ROLE_COMBO, channel, nullptr, 0); res != 0)
+    {
+        DBG_PRINTF("Dbg: Add peer failed, code %d\n", res);
+        return false;
+    }
+    DBG_PRINTF("Dbg: Add peer OK (MAC: %02X:%02X... CH:%d)\n", mac[0], mac[1], channel);
+    return true;
+}
+
+// Quét kênh với log từng bước
 static bool scanAndDiscover()
 {
-    DBG_PRINTLN("Dbg: Starting Scan...");
-    uint8_t broadcastMac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    DBG_PRINTLN("Dbg: --- STARTING SCAN (1->13) ---");
     myData.msg_type = DISCOVERY_REQ;
 
     for (int c = 1; c <= 13; c++)
     {
+        DBG_PRINTF("Dbg: Scan CH %d...\n", c);
         wifi_set_channel(c);
-        esp_now_add_peer(broadcastMac, ESP_NOW_ROLE_COMBO, c, nullptr, 0);
-        esp_now_send(broadcastMac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
+        delay(5);
+
+        if (!addPeerWithRetry(broadcastMac, c))
+            continue;
+
+        deliverySuccess = false;
+        const int sendResult = esp_now_send(broadcastMac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
+        DBG_PRINTF("Dbg: esp_now_send result = %d\n", sendResult);
 
         const unsigned long wait = millis();
-        while (millis() - wait < 40)
+        while (millis() - wait < 60)
         {
             if (deliverySuccess)
             {
+                DBG_PRINTF("Dbg: Found receiver on CH %d!\n", c);
                 saveConfigToEEPROM(sysConfig.mac, c);
-                DBG_PRINTF("Dbg: Found on CH %d\n", c);
+                esp_now_del_peer(broadcastMac);
                 return true;
             }
             yield();
         }
+        DBG_PRINTF("Dbg: No ACK on CH %d\n", c);
         esp_now_del_peer(broadcastMac);
     }
+    DBG_PRINTLN("Dbg: Scan complete - no response.");
     return false;
 }
 
-// Đọc trực tiếp mức logic ghim từ CH32 qua chân RX (GPIO3)
+// Đọc trạng thái
 static BuoyStatus getStatus()
 {
     const bool rawVal = digitalRead(PIN_LEVEL_INPUT);
     DBG_PRINTF("Dbg: PIN_LEVEL_INPUT Raw = %d\n", rawVal);
-
-    if (rawVal == STATUS_FULL)
-    {
-        return PUMP_OFF; // Mức HIGH từ CH32 -> Bồn đầy -> Báo TẮT BƠM
-    }
-    return PUMP_ON; // Mức LOW từ CH32 -> Bồn cạn -> Báo BẬT BƠM
+    return rawVal == STATUS_FULL ? PUMP_OFF : PUMP_ON;
 }
 
-// 🛠️ HÀM BÁO HOÀN THÀNH VÀ CHỜ CH32 TẮT NGUỒN
+// Kết thúc
 [[noreturn]] static void finishAndShutdown()
 {
-    DBG_PRINTLN("\nDbg: Gui tin hieu FINISH cho CH32 de ngat nguon EN...");
+    EspClass::wdtFeed(); // Reset watchdog ngay lập tức
 
-    // 1. Dập chân ACK (GPIO2) xuống LOW để báo CH32 biết việc đã xong
+    DBG_PRINTLN("Dbg: Finishing, pull ACK low...");
     pinMode(PIN_MCU_ACK, OUTPUT);
     digitalWrite(PIN_MCU_ACK, LOW);
+    delay(50); // Cho ổn định
 
-    // 2. Tắt các tiến trình WiFi
-    WiFi.disconnect(true);
+    EspClass::wdtFeed();
+    WiFi.disconnect(true); // Ngắt WiFi
+    EspClass::wdtFeed();
     WiFi.mode(WIFI_OFF);
+    EspClass::wdtFeed();
 
-    // 3. Đứng chờ CH32 dập chân EN ngắt nguồn hoàn toàn
+    DBG_FLUSH();
+    EspClass::wdtFeed();
+
     while (true)
     {
         yield();
+        EspClass::wdtFeed(); // Feed watchdog trong vòng lặp
     }
 }
 
 void setup()
 {
-    // 🛠️ BƯỚC 1: Khóa chân ACK (GPIO2) ở INPUT để bảo vệ Bootrom
-    pinMode(PIN_MCU_ACK, INPUT);
-
-    // 🛠️ BƯỚC 2: Giải phóng chân RX (GPIO3) làm chân Digital Input
+    // Giải phóng RX
     Serial.end();
+    pinMode(PIN_MCU_ACK, INPUT);
     pinMode(PIN_LEVEL_INPUT, INPUT);
     delay(2);
 
-    DBG_BEGIN(74880);
-    DBG_PRINTLN("\n\n--- SENDER ĐÃ TỐI ƯU CÙNG CH32V003 (NO RTC) ---");
+    // Giảm công suất WiFi
+    WiFi.setOutputPower(17);
 
-    // Khởi tạo ESP-NOW
+    DBG_BEGIN(74880, SERIAL_8N1, SERIAL_TX_ONLY);
+    DBG_PRINTLN("\n\n--- SENDER (NO RTC) ---");
+
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
 
@@ -171,66 +209,97 @@ void setup()
     myData.key = SECRET_KEY;
     myData.msg_type = DATA_SEND;
 
-    // Đo điện áp VCC
+    // Đo VCC
     uint32_t vcc_acc = 0;
-    for (int i = 0; i < 4; i++)
-    {
-        vcc_acc += EspClass::getVcc();
-    }
-    uint32_t average_battery_voltage = vcc_acc / 4 + VCC_SS8550_OFFSET;
-    if (average_battery_voltage > BATTERY_MAX) average_battery_voltage = BATTERY_MAX;
-    if (average_battery_voltage < BATTERY_CRITICAL) average_battery_voltage = BATTERY_CRITICAL;
-    myData.battery_voltage = vcc_acc / 4 + VCC_SS8550_OFFSET;
+    for (int i = 0; i < 4; i++) vcc_acc += EspClass::getVcc();
+    uint32_t avg = vcc_acc / 4 + VCC_SS8550_OFFSET;
+    if (avg > BATTERY_MAX) avg = BATTERY_MAX;
+    if (avg < BATTERY_CRITICAL) avg = BATTERY_CRITICAL;
+    myData.battery_voltage = avg;
     DBG_PRINTF("Dbg: VCC = %d mV\n", myData.battery_voltage);
 
-    // Đọc trạng thái phao ghim sẵn từ CH32
+    // Đọc trạng thái
     myData.status = getStatus();
     DBG_PRINTF("Dbg: Status to send: %s\n", myData.status == PUMP_ON ? "ON" : "OFF");
 
-    // Lấy kênh WiFi & MAC đã lưu từ EEPROM
-
-    // Nếu đã có cấu hình trong EEPROM -> Gửi nhanh
+    // ---------- QUICK SEND ----------
     if (loadConfigFromEEPROM())
     {
-        DBG_PRINTF("Dbg: Quick send CH %d\n", sysConfig.channel);
+        DBG_PRINTF("Dbg: Quick send on CH %d...\n", sysConfig.channel);
         wifi_set_channel(sysConfig.channel);
-        esp_now_add_peer(sysConfig.mac, ESP_NOW_ROLE_COMBO, sysConfig.channel, nullptr, 0);
+        delay(1);
 
-        for (uint8_t retry = 0; retry < 3; retry++)
+        if (addPeerWithRetry(sysConfig.mac, sysConfig.channel))
         {
-            esp_now_send(sysConfig.mac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
-
-            const unsigned long startWait = millis();
-            while (millis() - startWait < 80)
+            for (uint8_t retry = 0; retry < 2; retry++)
             {
-                if (deliverySuccess)
+                DBG_PRINTF("Dbg: Quick retry %d/2\n", retry + 1);
+                deliverySuccess = false;
+                const int sendResult = esp_now_send(sysConfig.mac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
+                DBG_PRINTF("Dbg: esp_now_send result = %d\n", sendResult);
+
+                const unsigned long start = millis();
+                while (millis() - start < 50)
                 {
-                    DBG_PRINTLN("Dbg: Quick Success.");
-                    finishAndShutdown(); // Dập ACK LOW & chờ CH32 cắt nguồn EN
+                    if (deliverySuccess)
+                    {
+                        const unsigned long elapsed = millis() - start;
+                        DBG_PRINTF("Dbg: Quick send SUCCESS! ACK received after %lu ms\n", elapsed);
+                        finishAndShutdown();
+                    }
+                    yield();
+                    EspClass::wdtFeed();
                 }
-                yield();
+                DBG_PRINTF("Dbg: Quick retry %d - no ACK\n", retry + 1);
+                delay(5);
             }
-            if (deliverySuccess) break;
         }
+        DBG_PRINTLN("Dbg: Quick send FAILED (no ACK or peer error).");
     }
 
-    // Nếu gửi nhanh thất bại hoặc chưa có EEPROM -> Quét 13 kênh
+    // ---------- SCAN ----------
     if (!deliverySuccess)
     {
         if (scanAndDiscover())
         {
+            DBG_PRINTLN("Dbg: Found receiver, sending DATA_SEND...");
             myData.msg_type = DATA_SEND;
-            esp_now_add_peer(sysConfig.mac, ESP_NOW_ROLE_COMBO, sysConfig.channel, nullptr, 0);
-            esp_now_send(sysConfig.mac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
-            delay(40);
+            wifi_set_channel(sysConfig.channel);
+            delay(1);
+
+            if (addPeerWithRetry(sysConfig.mac, sysConfig.channel))
+            {
+                for (uint8_t retry = 0; retry < 2; retry++)
+                {
+                    DBG_PRINTF("Dbg: Data retry %d/2\n", retry + 1);
+                    deliverySuccess = false;
+                    const int sendResult = esp_now_send(sysConfig.mac, reinterpret_cast<uint8_t*>(&myData),
+                                                        sizeof(myData));
+                    DBG_PRINTF("Dbg: esp_now_send result = %d\n", sendResult);
+
+                    const unsigned long start = millis();
+                    while (millis() - start < 50)
+                    {
+                        if (deliverySuccess)
+                        {
+                            DBG_PRINTLN("Dbg: DATA_SEND after scan SUCCESS!");
+                            finishAndShutdown();
+                        }
+                        yield();
+                    }
+                    DBG_PRINTF("Dbg: Data retry %d - no ACK\n", retry + 1);
+                    delay(5);
+                }
+                DBG_PRINTLN("Dbg: DATA_SEND after scan FAILED (no ACK).");
+            }
         }
         else
         {
-            DBG_PRINTLN("Dbg: Scan Failed.");
+            DBG_PRINTLN("Dbg: Scan failed, receiver likely OFF.");
         }
     }
 
-    // Hoàn thành nhiệm vụ -> Báo CH32 ngắt nguồn
+    DBG_PRINTLN("Dbg: All attempts failed. Shutting down.");
     finishAndShutdown();
 }
 
