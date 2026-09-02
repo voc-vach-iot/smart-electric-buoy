@@ -8,7 +8,7 @@
 
 static WidgetRTC rtc;
 
-// --- CÁC BIẾN ĐỆM XỬ LÝ BẤT ĐỒNG BỘ ESP-NOW ---
+// --- CÁC BIẾN LƯU TRẠNG THÁI VÀ BỘ ĐỆM ESP-NOW ---
 static struct_message pendingMsg;
 static uint8_t pendingMac[6];
 static volatile bool hasPendingData = false;
@@ -21,28 +21,27 @@ static String getTimeString()
     return "[" + currentTime + "] ";
 }
 
-// Callback ngắt Wi-Fi: Chỉ lưu dữ liệu và bật cờ, KHÔNG xử lý gửi/nhận hay logic chậm ở đây
-// ReSharper disable CppParameterMayBeConstPtrOrRef
-// ReSharper disable once CppParameterNeverUsed
-static void OnDataRecv(uint8_t* mac, uint8_t* incomingData, uint8_t len)
+// Callback ngắt Wi-Fi: Đẩy nhanh dữ liệu vào bộ đệm Rx
+// ReSharper disable CppParameterMayBeConstPtrOrRef => Vì phải khớp với type callback của esp_now
+// ReSharper disable once CppParameterNeverUsed => Dù có thể không dùng hết các tham số, nhưng phải giữ nguyên để đăng ký callback
+static void OnDataRecv(uint8_t* mac, uint8_t* incomingData, const uint8_t len)
 {
     if (len != sizeof(struct_message)) return;
 
-    // Lưu tạm thông tin vào bộ đệm
     memcpy(&pendingMsg, incomingData, sizeof(pendingMsg));
     memcpy(pendingMac, mac, 6);
-    hasPendingData = true; // Bật cờ thông báo cho loop()
+    hasPendingData = true;
 }
 
-// Hàm xử lý gói tin ESP-NOW được gọi từ loop()
+// Xử lý gói tin ESP-NOW
 static void handleEspNowData()
 {
     if (!hasPendingData) return;
-    hasPendingData = false; // Xóa cờ ngay lập tức
+    hasPendingData = false;
 
     if (pendingMsg.key != SECRET_KEY) return;
 
-    // ----- 1. Xử lý DISCOVERY_REQ -----
+    // ----- 1. DISCOVERY_REQ -----
     if (pendingMsg.msg_type == DISCOVERY_REQ)
     {
         if (!esp_now_is_peer_exist(pendingMac))
@@ -59,10 +58,9 @@ static void handleEspNowData()
         return;
     }
 
-    // ----- 2. Xử lý DATA_SEND -----
+    // ----- 2. DATA_SEND -----
     if (pendingMsg.msg_type == DATA_SEND)
     {
-        // Đảm bảo peer tồn tại
         if (!esp_now_is_peer_exist(pendingMac))
         {
             uint8_t ch = WiFi.channel();
@@ -70,13 +68,13 @@ static void handleEspNowData()
             esp_now_add_peer(pendingMac, ESP_NOW_ROLE_COMBO, ch, nullptr, 0);
         }
 
-        // Gửi ACK phản hồi ngay khi ra khỏi ngắt Wi-Fi
+        // PHẢN HỒI ACK TỨC THÌ
         struct_message res;
         res.key = SECRET_KEY;
         res.msg_type = DATA_ACK;
         esp_now_send(pendingMac, reinterpret_cast<uint8_t*>(&res), sizeof(res));
 
-        // Thực hiện điều khiển Relay
+        // Điều khiển Relay
         if (pendingMsg.status == 1)
         {
             digitalWrite(RELAY_PIN, RELAY_ON);
@@ -86,7 +84,7 @@ static void handleEspNowData()
             digitalWrite(RELAY_PIN, RELAY_OFF);
         }
 
-        // Cập nhật trạng thái lên Blynk (nếu có kết nối Wi-Fi)
+        // Cập nhật trạng thái lên Blynk
         if (WiFi.status() == WL_CONNECTED)
         {
             Blynk.virtualWrite(V0, pendingMsg.status);
@@ -102,17 +100,10 @@ static void handleEspNowData()
     }
 }
 
-BLYNK_WRITE (V0)
+BLYNK_WRITE(V0)
 {
     const int manualState = param.asInt();
-    if (manualState == 1)
-    {
-        digitalWrite(RELAY_PIN, RELAY_ON);
-    }
-    else
-    {
-        digitalWrite(RELAY_PIN, RELAY_OFF);
-    }
+    digitalWrite(RELAY_PIN, (manualState == 1) ? RELAY_ON : RELAY_OFF);
     const String logMsg = manualState == 1 ? "👉 Bạn vừa BẬT bơm từ điện thoại" : "👉 Bạn vừa TẶT bơm từ điện thoại";
     Blynk.virtualWrite(V3, getTimeString() + logMsg + "\n");
 }
@@ -147,25 +138,35 @@ void setup()
 
     if (wm.autoConnect(apName.c_str()))
     {
+        // 1. GIẢM NHIỆT: Tắt Access Point, chuyển hẳn sang Client
+        WiFi.softAPdisconnect(true);
+        WiFi.mode(WIFI_STA);
+
+        // 2. TỐI ƯU SÓNG: Giữ phần cứng RF mở 24/7 (Không miss gói tin nào từ Sender)
+        WiFi.setSleepMode(WIFI_NONE_SLEEP);
+
+        // 3. GIẢM NHIỆT: Hạ công suất phát Wi-Fi xuống 17.5 dBm vừa đủ mát
+        WiFi.setOutputPower(17.5);
+
         Blynk.config(BLYNK_AUTH_TOKEN);
         setSyncInterval(10 * 60);
-        // Cố định channel Wi-Fi sau khi kết nối
-        wifi_set_channel(WIFI_CHANNEL);
     }
-    else
-    {
-        // Không kết nối được WiFi, vẫn dùng channel cố định
-        wifi_set_channel(WIFI_CHANNEL);
-    }
+
+    // Cố định lại channel Wi-Fi
+    wifi_set_channel(WIFI_CHANNEL);
 }
 
 void loop()
 {
-    // Ưu tiên xử lý các gói tin ESP-NOW chờ gửi ACK trước
+    // Ưu tiên xử lý các gói tin ESP-NOW trong bộ đệm
     handleEspNowData();
 
+    // Run Blynk
     if (WiFi.status() == WL_CONNECTED)
     {
         Blynk.run();
     }
+
+    // GIẢM NHIỆT CPU: Cho CPU nghỉ 1ms mỗi lượt lặp (RF vẫn nhận sóng bình thường)
+    delay(1);
 }

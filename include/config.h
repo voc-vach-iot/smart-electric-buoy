@@ -43,6 +43,21 @@ typedef struct struct_message
 #define STATUS_FULL HIGH
 #define STATUS_EMPTY LOW
 #define VCC_SS8550_OFFSET 175
+
+// ============================================================================
+// CẤU HÌNH THỜI GIAN VÀ RETRY (DỄ DÀNG ĐIỀU CHỈNH)
+// ============================================================================
+#define EEPROM_SIZE             32
+#define EEPROM_ADDR             0
+#define EEPROM_MAGIC            0xAB
+
+#define QUICK_SEND_RETRIES      5     // Số lần thử gửi nhanh (Quick Send)
+#define DATA_SEND_RETRIES       2     // Số lần thử gửi dữ liệu sau khi Scan
+#define ACK_TIMEOUT_MS          15    // Thời gian chờ ACK cho mỗi lượt gửi (ms)
+#define SCAN_ACK_TIMEOUT_MS     20    // Thời gian chờ ACK khi đang Quét Kênh (ms)
+#define RETRY_DELAY_MS          5     // Khoảng nghỉ giữa các lần thử lại (ms)
+#define CHANNEL_SETTLE_DELAY_MS 1     // Thời gian chờ sau khi đổi Channel Wi-Fi (ms)
+#define SHUTDOWN_DELAY_MS       50    // Thời gian giữ chân ACK trước khi tắt hoàn toàn (ms)
 #endif
 
 // Định nghĩa chân cắm cho Receiver
@@ -58,9 +73,9 @@ typedef struct struct_message
 #define RELAY_OFF LOW
 #endif
 
-#define BLYNK_TEMPLATE_ID "TMPL6fHo4wONF"
+#define BLYNK_TEMPLATE_ID "***REMOVED***"
 #define BLYNK_TEMPLATE_NAME "Bơm điện thông minh"
-#define BLYNK_AUTH_TOKEN "FgKNLL0eg-YfPt7_6EMmGB27idL8eZ6w"
+#define BLYNK_AUTH_TOKEN "***REMOVED***"
 #endif
 
 #ifdef DEBUG_MODE

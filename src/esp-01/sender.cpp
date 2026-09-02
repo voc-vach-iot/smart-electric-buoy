@@ -6,10 +6,6 @@
 
 ADC_MODE(ADC_VCC);
 
-#define EEPROM_SIZE 32
-#define EEPROM_ADDR 0
-#define EEPROM_MAGIC 0xAB
-
 namespace
 {
     struct ConfigData
@@ -25,10 +21,9 @@ static struct_message myData;
 static volatile bool deliverySuccess = false;
 static uint8_t broadcastMac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
-// Lưu config (có log chi tiết)
+// Lưu config vào EEPROM (Tránh ghi lặp dữ liệu cũ)
 static void saveConfigToEEPROM(const uint8_t* mac, const uint8_t channel)
 {
-    // Kiểm tra trùng để tránh ghi thừa
     if (sysConfig.magic == EEPROM_MAGIC &&
         sysConfig.channel == channel &&
         memcmp(sysConfig.mac, mac, 6) == 0)
@@ -50,13 +45,17 @@ static void saveConfigToEEPROM(const uint8_t* mac, const uint8_t channel)
                sysConfig.mac[0], sysConfig.mac[1], sysConfig.mac[2],
                sysConfig.mac[3], sysConfig.mac[4], sysConfig.mac[5],
                sysConfig.channel);
-    if (ok)
-        DBG_PRINTLN("Dbg: EEPROM commit SUCCESS!");
-    else
+    if (!ok)
+    {
         DBG_PRINTLN("Dbg: EEPROM commit FAILED!");
+    }
+    else
+    {
+        DBG_PRINTLN("Dbg: EEPROM commit SUCCESS!");
+    }
 }
 
-// Đọc EEPROM với log MAC và channel
+// Đọc cấu hình từ EEPROM
 static bool loadConfigFromEEPROM()
 {
     EEPROM.begin(EEPROM_SIZE);
@@ -76,7 +75,7 @@ static bool loadConfigFromEEPROM()
     return false;
 }
 
-// Callback nhận ACK (đã có log)
+// Callback xử lý gói tin nhận về (ACK)
 // ReSharper disable CppParameterMayBeConstPtrOrRef => Vì phải khớp với type callback của esp_now
 // ReSharper disable once CppParameterNeverUsed => Dù có thể không dùng hết các tham số, nhưng phải giữ nguyên để đăng ký callback
 static void OnDataRecv(uint8_t* mac, uint8_t* incomingData, const uint8_t len)
@@ -96,7 +95,7 @@ static void OnDataRecv(uint8_t* mac, uint8_t* incomingData, const uint8_t len)
     }
 }
 
-// Thêm peer có log lỗi
+// Đăng ký Peer ESP-NOW
 static bool addPeerWithRetry(uint8_t* mac, const uint8_t channel)
 {
     if (const int res = esp_now_add_peer(mac, ESP_NOW_ROLE_COMBO, channel, nullptr, 0); res != 0)
@@ -108,27 +107,27 @@ static bool addPeerWithRetry(uint8_t* mac, const uint8_t channel)
     return true;
 }
 
-// Quét kênh với log từng bước
+// Quét toàn bộ 13 channel Wi-Fi để tìm Receiver
 static bool scanAndDiscover()
 {
-    DBG_PRINTLN("Dbg: --- STARTING SCAN (1->13) ---");
+    DBG_PRINTLN("Dbg: --- STARTING SCAN (13->1) ---");
     myData.msg_type = DISCOVERY_REQ;
 
-    for (int c = 1; c <= 13; c++)
+    for (int c = 13; c >= 1; c--)
     {
         DBG_PRINTF("Dbg: Scan CH %d...\n", c);
         wifi_set_channel(c);
-        delay(5);
+        delay(CHANNEL_SETTLE_DELAY_MS);
 
         if (!addPeerWithRetry(broadcastMac, c))
             continue;
 
         deliverySuccess = false;
-        const int sendResult = esp_now_send(broadcastMac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
-        DBG_PRINTF("Dbg: esp_now_send result = %d\n", sendResult);
+        esp_now_send(broadcastMac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
+        DBG_PRINTLN("Dbg: esp_now_send called");
 
         const unsigned long wait = millis();
-        while (millis() - wait < 60)
+        while (millis() - wait < SCAN_ACK_TIMEOUT_MS)
         {
             if (deliverySuccess)
             {
@@ -146,7 +145,7 @@ static bool scanAndDiscover()
     return false;
 }
 
-// Đọc trạng thái
+// Đọc trạng thái phao
 static BuoyStatus getStatus()
 {
     const bool rawVal = digitalRead(PIN_LEVEL_INPUT);
@@ -154,18 +153,18 @@ static BuoyStatus getStatus()
     return rawVal == STATUS_FULL ? PUMP_OFF : PUMP_ON;
 }
 
-// Kết thúc
+// Tắt vi điều khiển an toàn (Tránh đơ Watchdog)
 [[noreturn]] static void finishAndShutdown()
 {
-    EspClass::wdtFeed(); // Reset watchdog ngay lập tức
+    EspClass::wdtFeed();
 
     DBG_PRINTLN("Dbg: Finishing, pull ACK low...");
     pinMode(PIN_MCU_ACK, OUTPUT);
     digitalWrite(PIN_MCU_ACK, LOW);
-    delay(50); // Cho ổn định
+    delay(SHUTDOWN_DELAY_MS);
 
     EspClass::wdtFeed();
-    WiFi.disconnect(true); // Ngắt WiFi
+    WiFi.disconnect(true);
     EspClass::wdtFeed();
     WiFi.mode(WIFI_OFF);
     EspClass::wdtFeed();
@@ -176,7 +175,7 @@ static BuoyStatus getStatus()
     while (true)
     {
         yield();
-        EspClass::wdtFeed(); // Feed watchdog trong vòng lặp
+        EspClass::wdtFeed();
     }
 }
 
@@ -188,7 +187,7 @@ void setup()
     pinMode(PIN_LEVEL_INPUT, INPUT);
     delay(2);
 
-    // Giảm công suất WiFi
+    // Giảm công suất RF để tiết kiệm pin
     WiFi.setOutputPower(17);
 
     DBG_BEGIN(74880, SERIAL_8N1, SERIAL_TX_ONLY);
@@ -209,7 +208,7 @@ void setup()
     myData.key = SECRET_KEY;
     myData.msg_type = DATA_SEND;
 
-    // Đo VCC
+    // Đo điện áp VCC
     uint32_t vcc_acc = 0;
     for (int i = 0; i < 4; i++) vcc_acc += EspClass::getVcc();
     uint32_t avg = vcc_acc / 4 + VCC_SS8550_OFFSET;
@@ -218,46 +217,45 @@ void setup()
     myData.battery_voltage = avg;
     DBG_PRINTF("Dbg: VCC = %d mV\n", myData.battery_voltage);
 
-    // Đọc trạng thái
+    // Đọc trạng thái phao
     myData.status = getStatus();
     DBG_PRINTF("Dbg: Status to send: %s\n", myData.status == PUMP_ON ? "ON" : "OFF");
 
-    // ---------- QUICK SEND ----------
+    // ---------- 1. QUICK SEND ----------
     if (loadConfigFromEEPROM())
     {
         DBG_PRINTF("Dbg: Quick send on CH %d...\n", sysConfig.channel);
         wifi_set_channel(sysConfig.channel);
-        delay(1);
+        delay(CHANNEL_SETTLE_DELAY_MS);
 
         if (addPeerWithRetry(sysConfig.mac, sysConfig.channel))
         {
-            for (uint8_t retry = 0; retry < 2; retry++)
+            for (uint8_t retry = 0; retry < QUICK_SEND_RETRIES; retry++)
             {
-                DBG_PRINTF("Dbg: Quick retry %d/2\n", retry + 1);
+                DBG_PRINTF("Dbg: Quick retry %d/%d\n", retry + 1, QUICK_SEND_RETRIES);
                 deliverySuccess = false;
-                const int sendResult = esp_now_send(sysConfig.mac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
-                DBG_PRINTF("Dbg: esp_now_send result = %d\n", sendResult);
+                esp_now_send(sysConfig.mac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
+                DBG_PRINTLN("Dbg: esp_now_send called");
 
                 const unsigned long start = millis();
-                while (millis() - start < 50)
+                while (millis() - start < ACK_TIMEOUT_MS)
                 {
                     if (deliverySuccess)
                     {
-                        const unsigned long elapsed = millis() - start;
-                        DBG_PRINTF("Dbg: Quick send SUCCESS! ACK received after %lu ms\n", elapsed);
+                        DBG_PRINTLN("Dbg: Quick send SUCCESS! ACK received.");
                         finishAndShutdown();
                     }
                     yield();
                     EspClass::wdtFeed();
                 }
                 DBG_PRINTF("Dbg: Quick retry %d - no ACK\n", retry + 1);
-                delay(5);
+                delay(RETRY_DELAY_MS);
             }
         }
         DBG_PRINTLN("Dbg: Quick send FAILED (no ACK or peer error).");
     }
 
-    // ---------- SCAN ----------
+    // ---------- 2. SCAN & DATA SEND ----------
     if (!deliverySuccess)
     {
         if (scanAndDiscover())
@@ -265,20 +263,19 @@ void setup()
             DBG_PRINTLN("Dbg: Found receiver, sending DATA_SEND...");
             myData.msg_type = DATA_SEND;
             wifi_set_channel(sysConfig.channel);
-            delay(1);
+            delay(CHANNEL_SETTLE_DELAY_MS);
 
             if (addPeerWithRetry(sysConfig.mac, sysConfig.channel))
             {
-                for (uint8_t retry = 0; retry < 2; retry++)
+                for (uint8_t retry = 0; retry < DATA_SEND_RETRIES; retry++)
                 {
-                    DBG_PRINTF("Dbg: Data retry %d/2\n", retry + 1);
+                    DBG_PRINTF("Dbg: Data retry %d/%d\n", retry + 1, DATA_SEND_RETRIES);
                     deliverySuccess = false;
-                    const int sendResult = esp_now_send(sysConfig.mac, reinterpret_cast<uint8_t*>(&myData),
-                                                        sizeof(myData));
-                    DBG_PRINTF("Dbg: esp_now_send result = %d\n", sendResult);
+                    esp_now_send(sysConfig.mac, reinterpret_cast<uint8_t*>(&myData), sizeof(myData));
+                    DBG_PRINTLN("Dbg: esp_now_send called");
 
                     const unsigned long start = millis();
-                    while (millis() - start < 50)
+                    while (millis() - start < ACK_TIMEOUT_MS)
                     {
                         if (deliverySuccess)
                         {
@@ -288,7 +285,7 @@ void setup()
                         yield();
                     }
                     DBG_PRINTF("Dbg: Data retry %d - no ACK\n", retry + 1);
-                    delay(5);
+                    delay(RETRY_DELAY_MS);
                 }
                 DBG_PRINTLN("Dbg: DATA_SEND after scan FAILED (no ACK).");
             }
