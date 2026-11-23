@@ -34,6 +34,7 @@ typedef struct struct_message
 #define BATTERY_MAX      3300 // Điện áp sau ổn áp (hoặc pin đã vơi)
 #define BATTERY_WARNING  2800 // Mức nên báo về điện thoại để đi sạc
 #define BATTERY_CRITICAL 2600 // Mức cực kỳ nguy hiểm, nên ngắt hệ thống
+#define BATTERY_EMPTY_MV 3000 // Mức 0% hiển thị trên Blynk (sender báo ~2880 là bo sắp chết)
 
 // Định nghĩa chân cắm cho Sender
 #ifdef SENDER_MODE
@@ -71,6 +72,20 @@ typedef struct struct_message
 #else
 #define RELAY_ON  HIGH
 #define RELAY_OFF LOW
+#endif
+
+#define BUTTON_PIN 2              // Nút nhấn nối GND, dùng pull-up nội. KHÔNG giữ nút khi cấp nguồn (GPIO2 là chân strapping)
+#define BUTTON_DEBOUNCE_MS 50
+
+// --- CHẾ ĐỘ NẠP TẠM QUA OTA (chỉ bật khi build với -D OTA_ENABLE) ---
+#ifdef OTA_ENABLE
+#define WIFI_SSID "***REMOVED***"
+#define WIFI_PASS "***REMOVED***"
+#define WIFI_CONNECT_TIMEOUT_MS 15000
+#define WIFI_RETRY_INTERVAL_MS  (5UL * 60 * 1000)
+
+#define OTA_HOSTNAME "bom-dien"
+#define OTA_PASSWORD "***REMOVED***"
 #endif
 
 #define BLYNK_TEMPLATE_ID "***REMOVED***"
