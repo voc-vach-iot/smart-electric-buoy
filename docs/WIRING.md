@@ -34,6 +34,7 @@ Không có giá trị R, diode nào khác trong repo.
 
 ## 2. Nguồn
 
+- Sender lắp trên breadboard mini; ESP-01S cắm qua module đế ra chân "ESP01 Breakout" (chỉ đổi 2×4 chân thành 1 hàng chân cắm breadboard, có sẵn 1 tụ lọc nguồn, không có ổn áp). Thứ tự chân trên đế: RXD, GP0, GP2, GND / VCC, RST, CHPD, TXD.
 - Sender: pin → LDO HT7333 → rail 3.3 V. Rail này cấp CH32V003 (VDD) và qua khóa PNP SS8550 cấp ESP-01S. Điện áp pin đọc bằng ADC_VCC của ESP-01S được bù offset hiệu chuẩn 175 mV (`VCC_SS8550_OFFSET`, config.h:46): ESP đo ngay sau khi được cấp nguồn, lúc điện áp chưa ổn định, và ADC của ESP-01 có sai số, nên giá trị này lấy từ hiệu chuẩn thực tế.
 - Receiver: 220VAC → AC-DC 5V 1A → module ESP-01S relay (5V). 220VAC cũng cấp cho contactor. ESP-01 lấy 3.3 V từ IC ổn áp AMS1117 có sẵn trên module relay.
 
