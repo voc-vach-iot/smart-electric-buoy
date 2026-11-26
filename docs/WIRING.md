@@ -53,7 +53,7 @@ Không có giá trị R, diode nào khác trong repo.
 | Pin - | CH32 VSS (pin2), ESP GND | GND | |
 | CH32 PD1 (pin8) | cổng nạp/printf debug (SWIO) | SWIO | printf dùng debug lib |
 
-> Phao chưa đo (2026-11-26): treo phao thấp (cạn) và nhấc cao (đầy), đo thông mạch A1-A2 và B1-B2. Cặp thông khi cạn nối EMPTY (PC4), cặp thông khi đầy nối FULL (PC1). Nếu ngược với cách tạm nối thì chỉ cần đổi 2 dây A2 và B2 cho nhau, không cần sửa firmware.
+> Phao chưa đo (2026-11-26): mỗi hãng phao nối khác nhau (màu dây, cặp tiếp điểm đóng khi đầy hay khi cạn), nên phải đo trước khi nối. treo phao thấp (cạn) và nhấc cao (đầy), đo thông mạch A1-A2 và B1-B2. Cặp thông khi cạn nối EMPTY (PC4), cặp thông khi đầy nối FULL (PC1). Nếu ngược với cách tạm nối thì chỉ cần đổi 2 dây A2 và B2 cho nhau, không cần sửa firmware.
 
 ## 4. Bảng kết nối (Receiver)
 
