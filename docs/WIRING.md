@@ -46,12 +46,14 @@ Không có giá trị R, diode nào khác trong repo.
 | CH32 PA2 (pin3) | ESP-01S GPIO0 | ACK | Trực tiếp, không R nối tiếp, không R kéo. ESP kéo LOW báo xong; CH32 dùng INPUT_PULLUP lúc chờ, sau đó OUTPUT LOW |
 | CH32 PC2 (pin6) | Base PNP SS8550 | ESP_PWR | LOW = cấp nguồn ESP, HIGH = ngắt. R base 330 Ω; R pull-up base-emitter 100 kΩ |
 | PNP SS8550 collector | ESP-01S VCC + CH_PD/EN + RST (nối chung) | ESP_VCC | Cả ba cùng rail đã chuyển mạch |
-| Phao FULL | CH32 PC1 (pin5) | FLOAT_FULL | Active HIGH, đánh thức rising; 100k pull-down ngoài |
-| Phao EMPTY | CH32 PC4 (pin7) | FLOAT_EMPTY | Active HIGH, đánh thức rising; 100k pull-down ngoài |
+| Phao FULL | CH32 PC1 (pin5) | FLOAT_FULL | Active HIGH, đánh thức rising; 100k pull-down ngoài. Tạm nối cặp A1-A2 (A1 vào 3V3, A2 vào PC1); CHƯA đo, xem ghi chú dưới |
+| Phao EMPTY | CH32 PC4 (pin7) | FLOAT_EMPTY | Active HIGH, đánh thức rising; 100k pull-down ngoài. Tạm nối cặp B1-B2 (B1 vào 3V3, B2 vào PC4); CHƯA đo |
 | Pin + | HT7333 VIN | VBAT | Pin cấp LDO |
 | HT7333 VOUT (3.3 V) | CH32 VDD (pin4), nguồn cho khóa PNP | RAIL_3V3 | Cùng một rail 3.3 V cấp CH32V003 và phía trước SS8550 (ESP-01S). Tụ 1000 µF trên rail |
 | Pin - | CH32 VSS (pin2), ESP GND | GND | |
 | CH32 PD1 (pin8) | cổng nạp/printf debug (SWIO) | SWIO | printf dùng debug lib |
+
+> Phao chưa đo (2026-11-26): mỗi hãng phao nối khác nhau (màu dây, cặp tiếp điểm đóng khi đầy hay khi cạn), nên phải đo trước khi nối. treo phao thấp (cạn) và nhấc cao (đầy), đo thông mạch A1-A2 và B1-B2. Cặp thông khi cạn nối EMPTY (PC4), cặp thông khi đầy nối FULL (PC1). Nếu ngược với cách tạm nối thì chỉ cần đổi 2 dây A2 và B2 cho nhau, không cần sửa firmware.
 
 ## 4. Bảng kết nối (Receiver)
 
@@ -71,6 +73,26 @@ Nguồn và tải:
 | ESP-01 GPIO2 | Nút nhấn bơm, nút còn lại nối GND | BTN | INPUT_PULLUP nội; config.h:77 BUTTON_PIN; không giữ nút khi cấp nguồn |
 | ESP-01 RST | Nút nhấn reset, nút còn lại nối GND | RST | Nhấn kéo RST xuống GND để reset MCU. Không dùng chân GPIO |
 | AMS1117 trên module relay (3V3) | ESP-01 VCC, CH_PD | 3V3 | Ổn áp có sẵn trên module |
+
+### 4.1 Nối bơm vào tiếp điểm động lực contactor (GLEX LNC1-25)
+
+Tiếp điểm động lực 1-2 và 3-4 của contactor chưa nối trong sơ đồ Fritzing vì mỗi hãng bơm nối khác nhau (bơm 1 pha 2 dây, bơm có tụ đề, bơm có phao hoặc rơ-le nhiệt riêng...). Dạng chung cho bơm 1 pha:
+| Từ | Đến | Ghi chú |
+|---|---|---|
+| Dây lửa L (từ CB/aptomat) | Cực 1 contactor | Đầu vào tiếp điểm 1 |
+| Cực 2 contactor | L của bơm | Đầu ra tiếp điểm 1-2 |
+| Dây trung tính N (từ CB/aptomat) | Cực 3 contactor | Đầu vào tiếp điểm 3 |
+| Cực 4 contactor | N của bơm | Đầu ra tiếp điểm 3-4 |
+| Dây PE (nếu bơm có) | Vỏ/PE của bơm | Không qua contactor |
+
+Thông số in trên contactor (theo part `contactor-glex-lnc1-25`, nhãn IEC61095): Ie (AC-7a) 25 A, Ue~ 230 V, Ui~ 500 V, AC-7a 4 kW, AC-7b 1.2 kW. Cuộn A1/A2 220/230 V~. Chỉ có 2 tiếp điểm (1-2, 3-4).
+
+Lưu ý:
+- Cách nối tuỳ hãng bơm: xem sơ đồ trên nhãn hoặc hướng dẫn của bơm. Bơm có tụ đề hoặc hộp điện riêng thì nối cực 2 và 4 vào đầu vào nguồn của hộp (L, N), không nối thẳng vào cuộn dây bơm.
+- Công suất bơm không vượt định mức contactor. Contactor này theo IEC 61095 (dùng cho gia dụng): bơm là tải động cơ nên tính theo AC-7b, tối đa 1.2 kW. Mức AC-7a (4 kW) chỉ dành cho tải thuần trở như bình nóng lạnh, không áp dụng cho bơm.
+- Dùng dây đủ tiết diện cho dòng bơm, có CB/aptomat phía trước contactor.
+- Làm việc với 220 V phải ngắt điện (CB) trước khi nối hoặc sửa dây.
+- Sơ đồ Fritzing (`docs/fritzing/receiver.fzz`) có ghi chú cạnh contactor nhắc các điểm trên.
 
 ## 5. Bảng chân MCU
 
