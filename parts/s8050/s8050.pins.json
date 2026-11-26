@@ -1,0 +1,2 @@
+{"title":"S8050 TO-92","family":"Transistor NPN","description":"S8050 NPN transistor, TO-92. Nhin mat phang, chan xuong: E, B, C.","tags":["s8050","transistor","npn","to-92"],
+ "pins":[{"name":"E","desc":"Emitter","svg_id":"connector0pin"},{"name":"B","desc":"Base","svg_id":"connector1pin"},{"name":"C","desc":"Collector","svg_id":"connector2pin"}]}
