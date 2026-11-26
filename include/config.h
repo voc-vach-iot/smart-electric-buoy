@@ -6,7 +6,7 @@
 // #define DEBUG_MODE 
 
 #define WIFI_CHANNEL 6
-#define SECRET_KEY 0x00000000
+#include "secrets.h" // SECRET_KEY, WIFI_SSID, WIFI_PASS, OTA_*, BLYNK_* (chép từ secrets.example.h)
 #define RTC_ADDR 64
 
 enum MessageType
@@ -77,20 +77,13 @@ typedef struct struct_message
 #define BUTTON_PIN 2              // Nút nhấn nối GND, dùng pull-up nội. KHÔNG giữ nút khi cấp nguồn (GPIO2 là chân strapping)
 #define BUTTON_DEBOUNCE_MS 50
 
+
 // --- CHẾ ĐỘ NẠP TẠM QUA OTA (chỉ bật khi build với -D OTA_ENABLE) ---
 #ifdef OTA_ENABLE
-#define WIFI_SSID "***REMOVED***"
-#define WIFI_PASS "***REMOVED***"
 #define WIFI_CONNECT_TIMEOUT_MS 15000
 #define WIFI_RETRY_INTERVAL_MS  (5UL * 60 * 1000)
-
-#define OTA_HOSTNAME "bom-dien"
-#define OTA_PASSWORD "***REMOVED***"
 #endif
 
-#define BLYNK_TEMPLATE_ID "***REMOVED***"
-#define BLYNK_TEMPLATE_NAME "Bơm điện thông minh"
-#define BLYNK_AUTH_TOKEN "***REMOVED***"
 #endif
 
 #ifdef DEBUG_MODE

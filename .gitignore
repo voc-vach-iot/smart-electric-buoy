@@ -3,3 +3,5 @@
 .vscode
 *.patch
 __pycache__/
+include/secrets.h
+secrets.ini
