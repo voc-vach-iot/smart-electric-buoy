@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Part Fritzing</title>
+<style>
+  body { margin: 0; padding: 24px; background: #e5e5e5; font-family: Arial, sans-serif; }
+  #wrap { width: 640px; background: #fff; padding: 16px; }
+  #wrap svg { width: 100%; height: auto; }
+  button { margin: 12px 0; padding: 8px 16px; font-size: 16px; }
+  pre { background: #fff; padding: 8px; }
+</style>
+</head>
+<body>
+<button id="dl">Tải SVG</button>
+<div id="wrap"></div>
+<pre id="report"></pre>
+<script>
+// ================= THƯ VIỆN (KHÔNG SỬA) =================
+// Đơn vị mọi hàm: mm. Gốc (0,0) ở góc trên trái board.
+const P = 2.54;                 // bước chân
+const el = [];                  // phần tử SVG
+const pins = [];                // {id, x, y}
+const f = n => +n.toFixed(3);
+const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const pinId = name => "pin_" + String(name).toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+// Khối chữ nhật bo góc. o = {fill, stroke, sw, r}
+function rect(x, y, w, h, o = {}) {
+  el.push(`<rect x="${f(x)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" rx="${o.r ?? 0}" fill="${o.fill ?? "#333"}"` +
+    (o.stroke ? ` stroke="${o.stroke}" stroke-width="${o.sw ?? 0.2}"` : "") + "/>");
+}
+function circle(cx, cy, r, o = {}) {
+  el.push(`<circle cx="${f(cx)}" cy="${f(cy)}" r="${f(r)}" fill="${o.fill ?? "#333"}"` +
+    (o.stroke ? ` stroke="${o.stroke}" stroke-width="${o.sw ?? 0.2}"` : "") + "/>");
+}
+function line(x1, y1, x2, y2, o = {}) {
+  el.push(`<line x1="${f(x1)}" y1="${f(y1)}" x2="${f(x2)}" y2="${f(y2)}" stroke="${o.stroke ?? "#333"}" stroke-width="${o.sw ?? 0.3}" stroke-linecap="round"/>`);
+}
+function path(d, o = {}) {   // d dùng toạ độ mm
+  el.push(`<path d="${d}" fill="${o.fill ?? "none"}" stroke="${o.stroke ?? "#333"}" stroke-width="${o.sw ?? 0.3}"/>`);
+}
+// Chữ. o = {size (mm, mặc định 1.2), fill, anchor: start|middle|end, rotate (độ), bold}
+function text(x, y, s, o = {}) {
+  const rot = o.rotate ? ` transform="rotate(${o.rotate} ${f(x)} ${f(y)})"` : "";
+  el.push(`<text x="${f(x)}" y="${f(y + 0.35 * (o.size ?? 1.2))}" font-family="Arial, sans-serif" font-size="${o.size ?? 1.2}" fill="${o.fill ?? "#fff"}"` +
+    ` text-anchor="${o.anchor ?? "middle"}"${o.bold ? ' font-weight="bold"' : ""}${rot}>${esc(s)}</text>`);
+}
+// PCB của board.
+function board(color = "#1f6f3f", r = 1) { rect(0.15, 0.15, W - 0.3, H - 0.3, { fill: color, r, stroke: "#00000055", sw: 0.3 }); }
+
+// Một chân: lỗ vàng có id pin_<TÊN>. shape: "round" | "square"
+function pin(name, x, y, shape = "round") {
+  const id = pinId(name);
+  if (pins.some(p => p.id === id)) throw new Error("Trùng id chân: " + id + " (thêm số, ví dụ GND1, GND2)");
+  if (shape === "square")
+    el.push(`<rect id="${id}" x="${f(x - 0.8)}" y="${f(y - 0.8)}" width="1.6" height="1.6" fill="#d4a017" stroke="#8a6a00" stroke-width="0.15"/>`);
+  else
+    el.push(`<circle id="${id}" cx="${f(x)}" cy="${f(y)}" r="0.8" fill="#d4a017" stroke="#8a6a00" stroke-width="0.15"/>`);
+  circle(x, y, 0.4, { fill: "#222" });
+  pins.push({ id, x: f(x), y: f(y) });
+}
+// Hàng chân thẳng, cách 2.54 mm. dir: "right" | "down". label: vị trí chữ in lụa
+// so với chân: "above" | "below" | "left" | "right" | null. Chân đầu vuông nếu firstSquare.
+function pinRow(names, x0, y0, dir = "right", o = {}) {
+  names.forEach((n, i) => {
+    const x = dir === "right" ? x0 + i * P : x0, y = dir === "down" ? y0 + i * P : y0;
+    pin(n, x, y, o.firstSquare && i === 0 ? "square" : "round");
+    const off = o.labelOffset ?? 1.9, lab = o.label;
+    if (lab === "above") text(x, y - off, n, { size: o.size ?? 0.9, rotate: o.rotateLabel ? -90 : 0, anchor: o.rotateLabel ? "start" : "middle" });
+    if (lab === "below") text(x, y + off, n, { size: o.size ?? 0.9, rotate: o.rotateLabel ? -90 : 0, anchor: o.rotateLabel ? "end" : "middle" });
+    if (lab === "left") text(x - off, y, n, { size: o.size ?? 0.9, anchor: "end" });
+    if (lab === "right") text(x + off, y, n, { size: o.size ?? 0.9, anchor: "start" });
+  });
+}
+// Header nhựa đen bao quanh một hàng chân (vẽ TRƯỚC pinRow).
+function headerBody(n, x0, y0, dir = "right") {
+  const L = n * P;
+  if (dir === "right") rect(x0 - P / 2, y0 - P / 2, L, P, { fill: "#1a1a1a" });
+  else rect(x0 - P / 2, y0 - P / 2, P, L, { fill: "#1a1a1a" });
+}
+// Chip IC: thân đen, chân bạc 2 cạnh (chỉ trang trí, không phải chân Fritzing).
+function chip(x, y, w, h, name = "", o = {}) {
+  const n = o.legs ?? 0, legW = 0.4;
+  for (let i = 0; i < n; i++) {
+    const ly = y + h * (i + 0.5) / n;
+    rect(x - 0.6, ly - legW / 2, 0.6, legW, { fill: "#bbb" });
+    rect(x + w, ly - legW / 2, 0.6, legW, { fill: "#bbb" });
+  }
+  rect(x, y, w, h, { fill: "#222", r: 0.2 });
+  circle(x + 0.6, y + 0.6, 0.25, { fill: "#444" });
+  if (name) text(x + w / 2, y + h / 2, name, { size: o.size ?? Math.min(1.2, w / 6), fill: "#ddd" });
+}
+// Cầu đấu vít, các cực cách nhau `pitch` mm (5 hoặc 5.08). Chân id = tên cực.
+function terminal(names, x0, y0, pitch = 5.08, color = "#2e8b57") {
+  const n = names.length;
+  rect(x0 - pitch / 2, y0 - 3.5, n * pitch, 7, { fill: color, r: 0.4, stroke: "#00000066" });
+  names.forEach((nm, i) => {
+    const x = x0 + i * pitch;
+    circle(x, y0 - 1.2, 1.5, { fill: "#cfcfcf", stroke: "#777" });
+    line(x - 1, y0 - 2.2, x + 1, y0 - 0.2, { stroke: "#666", sw: 0.4 });
+    rect(x - 1.2, y0 + 1.2, 2.4, 1.6, { fill: "#111" });
+    pin(nm, x, y0 + 2.0, "square");
+  });
+}
+function smd(x, y, w, h, color = "#c8a070") { rect(x, y, w, h, { fill: color, stroke: "#00000044", sw: 0.1 }); }
+function led(x, y, color = "#e33") { rect(x - 0.5, y - 0.3, 1, 0.6, { fill: color }); }
+
+function buildSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}mm" height="${H}mm" viewBox="0 0 ${W} ${H}">\n` +
+    el.join("\n") + "\n</svg>";
+}
+function selfCheck() {
+  const out = ["id\tx(mm)\ty(mm)"];
+  pins.forEach(p => out.push(`${p.id}\t${p.x}\t${p.y}`));
+  pins.forEach(p => { if (p.x < 0 || p.y < 0 || p.x > W || p.y > H) out.push("LỖI: chân ngoài board " + p.id); });
+  return out.join("\n");
+}
+// ================= HẾT THƯ VIỆN =================
+
+// ================= PHẦN CỦA MODULE (CHỈ SỬA PHẦN NÀY) =================
+// HT7333-A, TO-92, nhìn mặt phẳng (front view): trái sang phải GND, VIN, VOUT.
+// Nguồn: Holtek HT73xx datasheet Rev 1.50, mục Pin Assignment/Pin Description.
+const NAME = "ht7333-a-to92";
+const W = 10.16, H = 14.0;
+const PY = 10.5;
+// chân bạc từ thân xuống pad
+[2.54, 5.08, 7.62].forEach(x => line(x, 6.5, x, PY, { stroke: "#bbb", sw: 0.5 }));
+// thân TO-92 đen mặt phẳng (trên tròn, đáy phẳng)
+path("M2.63 6.8 L2.63 4.4 A2.45 2.45 0 0 1 7.53 4.4 L7.53 6.8 Z", { fill: "#1a1a1a", stroke: "#000", sw: 0.2 });
+text(5.08, 5.6, "HT7333-A", { size: 0.95, fill: "#ddd", bold: true });
+pinRow(["GND", "VIN", "VOUT"], 2.54, PY, "right");
+["GND", "VIN", "VOUT"].forEach((n, i) => text(2.54 + i * P, PY + 2.2, n, { size: 0.9, fill: "#222" }));
+// ================= HẾT PHẦN MODULE =================
+
+document.getElementById("wrap").innerHTML = buildSvg();
+document.getElementById("report").textContent = selfCheck();
+document.getElementById("dl").onclick = () => {
+  const blob = new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + buildSvg()], { type: "image/svg+xml" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = NAME + ".svg"; a.click();
+};
+</script>
+</body>
+</html>

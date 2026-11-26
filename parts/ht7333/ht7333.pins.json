@@ -1,0 +1,2 @@
+{"title":"HT7333-A TO-92","family":"Voltage regulator","description":"Holtek HT7333-A LDO 3.3V 250mA, TO-92. Nhin mat phang: GND, VIN, VOUT (datasheet HT73xx Rev 1.50).","tags":["ht7333","ldo","3v3","to-92"],
+ "pins":[{"name":"GND","desc":"Ground","svg_id":"pin_GND"},{"name":"VIN","desc":"Input","svg_id":"pin_VIN"},{"name":"VOUT","desc":"Output 3.3V","svg_id":"pin_VOUT"}]}

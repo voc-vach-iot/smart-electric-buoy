@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="10.16mm" height="14mm" viewBox="0 0 10.16 14">
+<line x1="2.54" y1="6.5" x2="2.54" y2="10.5" stroke="#bbb" stroke-width="0.5" stroke-linecap="round"></line>
+<line x1="5.08" y1="6.5" x2="5.08" y2="10.5" stroke="#bbb" stroke-width="0.5" stroke-linecap="round"></line>
+<line x1="7.62" y1="6.5" x2="7.62" y2="10.5" stroke="#bbb" stroke-width="0.5" stroke-linecap="round"></line>
+<path d="M2.63 6.8 L2.63 4.4 A2.45 2.45 0 0 1 7.53 4.4 L7.53 6.8 Z" fill="#1a1a1a" stroke="#000" stroke-width="0.2"></path>
+<text x="5.08" y="5.932" font-family="Arial, sans-serif" font-size="0.95" fill="#ddd" text-anchor="middle" font-weight="bold">HT7333-A</text>
+<circle id="pin_GND" cx="2.54" cy="10.5" r="0.8" fill="#d4a017" stroke="#8a6a00" stroke-width="0.15"></circle>
+<circle cx="2.54" cy="10.5" r="0.4" fill="#222"></circle>
+<circle id="pin_VIN" cx="5.08" cy="10.5" r="0.8" fill="#d4a017" stroke="#8a6a00" stroke-width="0.15"></circle>
+<circle cx="5.08" cy="10.5" r="0.4" fill="#222"></circle>
+<circle id="pin_VOUT" cx="7.62" cy="10.5" r="0.8" fill="#d4a017" stroke="#8a6a00" stroke-width="0.15"></circle>
+<circle cx="7.62" cy="10.5" r="0.4" fill="#222"></circle>
+<text x="2.54" y="13.015" font-family="Arial, sans-serif" font-size="0.9" fill="#222" text-anchor="middle">GND</text>
+<text x="5.08" y="13.015" font-family="Arial, sans-serif" font-size="0.9" fill="#222" text-anchor="middle">VIN</text>
+<text x="7.62" y="13.015" font-family="Arial, sans-serif" font-size="0.9" fill="#222" text-anchor="middle">VOUT</text>
+</svg>

@@ -74,6 +74,26 @@ Nguồn và tải:
 | ESP-01 RST | Nút nhấn reset, nút còn lại nối GND | RST | Nhấn kéo RST xuống GND để reset MCU. Không dùng chân GPIO |
 | AMS1117 trên module relay (3V3) | ESP-01 VCC, CH_PD | 3V3 | Ổn áp có sẵn trên module |
 
+### 4.1 Nối bơm vào tiếp điểm động lực contactor (GLEX LNC1-25)
+
+Tiếp điểm động lực 1-2 và 3-4 của contactor chưa nối trong sơ đồ Fritzing vì mỗi hãng bơm nối khác nhau (bơm 1 pha 2 dây, bơm có tụ đề, bơm có phao hoặc rơ-le nhiệt riêng...). Dạng chung cho bơm 1 pha:
+| Từ | Đến | Ghi chú |
+|---|---|---|
+| Dây lửa L (từ CB/aptomat) | Cực 1 contactor | Đầu vào tiếp điểm 1 |
+| Cực 2 contactor | L của bơm | Đầu ra tiếp điểm 1-2 |
+| Dây trung tính N (từ CB/aptomat) | Cực 3 contactor | Đầu vào tiếp điểm 3 |
+| Cực 4 contactor | N của bơm | Đầu ra tiếp điểm 3-4 |
+| Dây PE (nếu bơm có) | Vỏ/PE của bơm | Không qua contactor |
+
+Thông số in trên contactor (theo part `contactor-glex-lnc1-25`, nhãn IEC61095): Ie (AC-7a) 25 A, Ue~ 230 V, Ui~ 500 V, AC-7a 4 kW, AC-7b 1.2 kW. Cuộn A1/A2 220/230 V~. Chỉ có 2 tiếp điểm (1-2, 3-4).
+
+Lưu ý:
+- Cách nối tuỳ hãng bơm: xem sơ đồ trên nhãn hoặc hướng dẫn của bơm. Bơm có tụ đề hoặc hộp điện riêng thì nối cực 2 và 4 vào đầu vào nguồn của hộp (L, N), không nối thẳng vào cuộn dây bơm.
+- Công suất bơm không vượt định mức contactor. Contactor này theo IEC 61095 (dùng cho gia dụng): bơm là tải động cơ nên tính theo AC-7b, tối đa 1.2 kW. Mức AC-7a (4 kW) chỉ dành cho tải thuần trở như bình nóng lạnh, không áp dụng cho bơm.
+- Dùng dây đủ tiết diện cho dòng bơm, có CB/aptomat phía trước contactor.
+- Làm việc với 220 V phải ngắt điện (CB) trước khi nối hoặc sửa dây.
+- Sơ đồ Fritzing (`docs/fritzing/receiver.fzz`) có ghi chú cạnh contactor nhắc các điểm trên.
+
 ## 5. Bảng chân MCU
 
 CH32V003J4M6 (pin ↔ cổng theo ch32v003_gpio_pins.h, J4M6: pin1=PA1, pin3=PA2, pin5=PC1, pin6=PC2, pin7=PC4, pin8=PD1):
