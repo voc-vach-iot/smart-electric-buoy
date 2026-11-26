@@ -46,12 +46,14 @@ Không có giá trị R, diode nào khác trong repo.
 | CH32 PA2 (pin3) | ESP-01S GPIO0 | ACK | Trực tiếp, không R nối tiếp, không R kéo. ESP kéo LOW báo xong; CH32 dùng INPUT_PULLUP lúc chờ, sau đó OUTPUT LOW |
 | CH32 PC2 (pin6) | Base PNP SS8550 | ESP_PWR | LOW = cấp nguồn ESP, HIGH = ngắt. R base 330 Ω; R pull-up base-emitter 100 kΩ |
 | PNP SS8550 collector | ESP-01S VCC + CH_PD/EN + RST (nối chung) | ESP_VCC | Cả ba cùng rail đã chuyển mạch |
-| Phao FULL | CH32 PC1 (pin5) | FLOAT_FULL | Active HIGH, đánh thức rising; 100k pull-down ngoài |
-| Phao EMPTY | CH32 PC4 (pin7) | FLOAT_EMPTY | Active HIGH, đánh thức rising; 100k pull-down ngoài |
+| Phao FULL | CH32 PC1 (pin5) | FLOAT_FULL | Active HIGH, đánh thức rising; 100k pull-down ngoài. Tạm nối cặp A1-A2 (A1 vào 3V3, A2 vào PC1); CHƯA đo, xem ghi chú dưới |
+| Phao EMPTY | CH32 PC4 (pin7) | FLOAT_EMPTY | Active HIGH, đánh thức rising; 100k pull-down ngoài. Tạm nối cặp B1-B2 (B1 vào 3V3, B2 vào PC4); CHƯA đo |
 | Pin + | HT7333 VIN | VBAT | Pin cấp LDO |
 | HT7333 VOUT (3.3 V) | CH32 VDD (pin4), nguồn cho khóa PNP | RAIL_3V3 | Cùng một rail 3.3 V cấp CH32V003 và phía trước SS8550 (ESP-01S). Tụ 1000 µF trên rail |
 | Pin - | CH32 VSS (pin2), ESP GND | GND | |
 | CH32 PD1 (pin8) | cổng nạp/printf debug (SWIO) | SWIO | printf dùng debug lib |
+
+> Phao chưa đo (2026-11-26): treo phao thấp (cạn) và nhấc cao (đầy), đo thông mạch A1-A2 và B1-B2. Cặp thông khi cạn nối EMPTY (PC4), cặp thông khi đầy nối FULL (PC1). Nếu ngược với cách tạm nối thì chỉ cần đổi 2 dây A2 và B2 cho nhau, không cần sửa firmware.
 
 ## 4. Bảng kết nối (Receiver)
 
